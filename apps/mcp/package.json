@@ -1,26 +1,37 @@
 {
   "name": "@jenz/mcp",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "private": false,
   "type": "module",
+  "description": "Jenz Managed Skills MCP server — audit AI-agent skills and pull back only the safe ones (gate-faithful client over the jenz audit API).",
+  "keywords": ["mcp", "model-context-protocol", "claude", "security", "prompt-injection", "skills"],
+  "license": "MIT",
+  "bin": {
+    "jenz-skills-mcp": "./dist/index.js"
+  },
+  "files": ["dist", "README.md"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && node scripts/add-shebang.mjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
     "mock": "tsx mock/server.ts",
-    "smoke": "pnpm build && tsx scripts/smoke.ts"
+    "smoke": "pnpm build && tsx scripts/smoke.ts",
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@hono/node-server": "^1.13.7",
-    "@jenz/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "hono": "^4.6.14",
     "zod": "^3"
   },
   "devDependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@jenz/shared": "workspace:*",
     "@types/node": "^22.10.2",
+    "hono": "^4.6.14",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^4.1.8"
