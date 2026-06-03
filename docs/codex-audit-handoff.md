@@ -1,6 +1,36 @@
 # Codex-Audit Handoff
 
-Last updated: 2026-06-03 ~14:10 CEST by `codex-audit`.
+Last updated: 2026-06-03 ~15:15 CEST by `codex-audit` (Claude session continuing the lane; Codex hit its limit).
+
+## ⭐ LATEST RE-AUDIT — GO/NO-GO (main `285cd45`)
+
+**Verdict: the PRODUCT is demo-ready. The only real risk is operational (DB resets).**
+
+GREEN — verified LIVE today:
+- **A. Local gates** (`285cd45`): typecheck + api 277✓/4 skipped + web 143✓ + mcp 5✓ + web/mcp builds. Node 26 engine warning only.
+- **B. GATE both-ways** (the core promise): LIVE — safe `GET /:id/files` → 200 **with** files; malicious → 403 **no** `files`. Verified **authed** (Bearer JWT) AND **unauth**. Fail-closed: missing ids → 404, no leak.
+- **C. Two-subdir onboarding (#1 demo-blocker)** — FIXED (`abf9029`) and proven LIVE in the signed-in browser: both `…/tree/main/skills/changelog-genie` and `…/deploy-preview` get DISTINCT labels, BOTH stage → BOTH stream (`POST /api/skills/import/stream`) → BOTH land. Verdicts correct: changelog-genie→malicious/quarantined (finding: instruction-override), deploy-preview→safe. Source+unit also green (onboardingLogic.test.ts:53-63, 143/143).
+- **D. No dup drift** — after import + full reload, library = exactly 2, no phantom rows.
+- **E. MCP `@jenz-ai/skills-mcp@0.1.1`** — gate holds through the published MCP: `pull_skill(safe)`→ok+2 files, `pull_skill(malicious)`→ok:false, NO files, "7 finding(s)…". `get_skill` returns taxonomy (0.1.0 additionalProperties bug fixed). Canonical `npx -y @jenz-ai/skills-mcp@0.1.1` boots clean (first attempt raced the download).
+- **G (core)** — real API data (no fixture fallback), real SSE progress+verdict, console 0 errors on the real flow.
+
+RISKS / FINDINGS (raise — not the auditor's to fix):
+- 🔴 **DB RESETS** keep wiping the demo workspace (twice today, ~12:58 + a re-seed by ~13:06). Verified with a VALID token (`/api/me`→200): authed `GET /api/skills`=0 while unauth=2. **Jo (DB/API): FREEZE resets through the demo.** This is the ONLY thing that breaks the live demo.
+- 🟡 **Workspace-scope split**: the live LIST is auth/workspace-scoped — signed-in dashboard=the user's workspace, unauth/MCP=global. The re-seed landed in the GLOBAL scope, not the demo workspace → signed-in dashboard starts empty while unauth/MCP see 2. Don't demo dashboard + MCP together (different libraries). `list_managed_skills` (token-less MCP)→0.
+- 🟡 **Stale-row → broken detail**: when a list row points to a server-deleted skill, `SkillDetail` renders a broken fallback (placeholder "Files 3: SKILL.md/examples//refs/" + "Couldn't load skill details/files: not_found") instead of a clean "removed" state. Web fix (refetch + 404 handling), not caching.
+- 🟡 **UI detail-page render** (safe files / malicious findings on the DETAIL page): verified via API+MCP (data correct); UI detail render not re-confirmed because a wipe interrupted the click. Low risk for a clean continuous import→click.
+- ℹ️ **Client-only controls** (install-to-local, sidebar add-skill, approve-anyway) still in source — not gate leaks, not truthful flows → don't click on stage.
+- ⚠️ **Caching is NOT a fix** (Natnael asked): caching the gate `/:id/files` verdict serves STALE security verdicts (unsafe for a gate) and worsens the stale-list→404 bug. Real fix = stop resets + seed into the demo workspace.
+
+Demo (proven): signed in → Import & audit → both subdir URLs → catches the injection, passes the benign. **GO iff resets are frozen.**
+
+Live ids drift on every re-seed; re-fetch before relying on any. As of ~13:06 the GLOBAL (unauth) rows were `cmpy2s5yp0024k42r80aavy9g` (safe) + `cmpy2r096001tk42rg2tmlnh0` (malicious); the signed-in demo workspace was empty.
+
+---
+
+_Below: earlier handoff state (pre-`285cd45`), kept for context._
+
+Last updated (prior): 2026-06-03 ~14:10 CEST by `codex-audit`.
 
 This file is the handoff for the audit lane only. It is not the team-lead handoff.
 Do not overwrite `docs/codex-team-lead-handoff.md`; that belongs to the Codex
