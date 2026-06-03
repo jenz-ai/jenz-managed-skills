@@ -1,0 +1,81 @@
+name: CI
+
+# Runs on every push (all branches) — also surfaces as checks on PRs.
+on: [push]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API — typecheck · test · build
+    runs-on: ubuntu-latest
+    # Ephemeral Postgres so the DB-backed gate/round-trip tests run hermetically
+    # (never against shared Supabase). migrate deploy replays the real migrations.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # install runs apps/api postinstall → prisma generate
+      - run: pnpm install --frozen-lockfile
+      - name: Prisma migrate deploy (ephemeral CI Postgres)
+        run: pnpm --filter @jenz/api exec prisma migrate deploy
+      - run: pnpm --filter @jenz/api typecheck
+      - run: pnpm --filter @jenz/api test
+      - run: pnpm --filter @jenz/api build
+
+  web:
+    name: Web — typecheck · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `build` = tsc -b && vite build → covers typecheck + bundle.
+      - run: pnpm --filter @jenz/web build
+
+  mcp:
+    name: MCP — typecheck · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @jenz/mcp typecheck
+      - run: pnpm --filter @jenz/mcp test
+      - run: pnpm --filter @jenz/mcp build
