@@ -7,14 +7,21 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "mock": "tsx mock/server.ts"
   },
   "dependencies": {
-    "@jenz/shared": "workspace:*"
+    "@hono/node-server": "^1.13.7",
+    "@jenz/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "hono": "^4.6.14",
+    "zod": "^3"
   },
   "devDependencies": {
+    "@types/node": "^22.10.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "@types/node": "^22.10.2"
+    "vitest": "^4.1.8"
   }
 }
