@@ -115,7 +115,11 @@ export default function App() {
   const handleResolved = (audited: AuditedSkill & { id: string }) => {
     const sk = auditedToSkill(audited);
     setSkills((arr) => {
-      const i = arr.findIndex((s) => s.id === sk.id);
+      // Reconcile by id OR name: a re-import persists the same skill under a
+      // NEW id, so matching on id alone would append a stale duplicate (old id
+      // still in the list, 404s on click). Name is the stable identity we carry
+      // on existing rows — collapse onto it so the row updates in place.
+      const i = arr.findIndex((s) => s.id === sk.id || s.name === sk.name);
       if (i === -1) return [...arr, sk];
       const next = arr.slice();
       next[i] = sk;
