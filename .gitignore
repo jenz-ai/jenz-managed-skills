@@ -21,3 +21,6 @@ weights/
 .DS_Store
 *.log
 .turbo/
+
+# conversation exports / transcripts — NEVER commit (may contain pasted secrets)
+*.txt
