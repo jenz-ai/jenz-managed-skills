@@ -1,4 +1,4 @@
-// App shell — breadcrumb. Always starts "Acme"; segments per view.
+// App shell — breadcrumb. Starts with the workspace name; segments per view.
 // Ported node-for-node from skills-app.jsx Breadcrumb().
 import { Fragment } from "react";
 import type { Skill, View } from "../state/types";
@@ -14,10 +14,11 @@ interface BreadcrumbProps {
   activeCategory: string | null;
   skill?: Skill;
   onNav: (view: View, cat?: string | null) => void;
+  workspaceName?: string;
 }
 
-export function Breadcrumb({ view, activeCategory, skill, onNav }: BreadcrumbProps) {
-  const segs: Seg[] = [{ label: "Acme", go: () => onNav("library", null) }];
+export function Breadcrumb({ view, activeCategory, skill, onNav, workspaceName = "Workspace" }: BreadcrumbProps) {
+  const segs: Seg[] = [{ label: workspaceName, go: () => onNav("library", null) }];
   if (view === "audit" || view === "audits") segs.push({ label: "Audits", current: true });
   else if (view === "settings") segs.push({ label: "Settings", current: true });
   else if (view === "quarantine") segs.push({ label: "Quarantine", current: true });

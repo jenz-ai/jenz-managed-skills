@@ -246,7 +246,7 @@ export default function App() {
           onLogout={() => { setScreen("onboarding"); setView("audits"); void signOut(); }}
         />
         <div className="js-main">
-          <Breadcrumb view={view} activeCategory={activeCategory} skill={skill} onNav={nav} />
+          <Breadcrumb view={view} activeCategory={activeCategory} skill={skill} onNav={nav} workspaceName={workspace?.name ?? "Workspace"} />
           {view === "audits" && (
             <div className="js-body">
               <ScreenSlot kind="auditHome" props={{ skills, onImport: () => setImportOpen(true), onOpenQuarantine: () => nav("quarantine"), onOpenSkill: openSkill }} />
