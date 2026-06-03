@@ -1,12 +1,12 @@
 {
-  // Typecheck-only config: covers mock/ and tests/ too (the build tsconfig.json compiles
+  // Typecheck-only config: covers mock/, tests/, scripts/ too (the build tsconfig.json compiles
   // src/ -> dist/ and must keep rootDir:"src", so it can't include these). noEmit + a wider
-  // rootDir let us catch type drift in the mock and tests without changing the build output.
+  // rootDir let us catch type drift in those without changing the build output.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "mock/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "mock/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"]
 }
