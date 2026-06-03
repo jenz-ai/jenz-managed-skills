@@ -29,7 +29,8 @@ disagreement.
 ## The 13 finding types
 
 These are the measures — the catalogue of things a finding can be. The set is **frozen**
-(it's the `type` enum in the auditor schema and `@jenz/shared`). "Caught by" shows the
+(the `type` enum lives in the auditor JSON schema + the `taxonomy.ts` keys — note
+`Finding.type` in `@jenz/shared` is a plain `string`, not a TS enum). "Caught by" shows the
 earliest layer that detects it: **L1** = deterministic regex prefilter (instant, free),
 **L3** = semantic LLM auditor (reasoning the regex can't do).
 
@@ -106,16 +107,18 @@ malicious   ← any finding is critical
 suspicious  ← the two passes disagree  (disagreement never auto-promotes to safe)
             OR any single high finding
             OR any medium finding
-safe        ← zero findings AND both passes agree
+safe        ← no medium-or-higher findings AND both passes agree
+            (i.e. zero findings, or only low-severity ones)
 ```
 
 Consequences worth internalising:
 
-- **`safe` is the hard case, not the easy one.** It requires *zero* findings *and* pass
-  agreement. Anything ambiguous falls to `suspicious` or `malicious`.
-- **A lone `low` returns `safe`** — deliberate. L1 assigns `low` only to weak signals, and
-  `safe` still demands pass agreement. This avoids over-quarantining benign deploy skills
-  (a real deploy skill legitimately contains `curl` + a token reference).
+- **`safe` is the hard case, not the easy one.** It requires *no medium-or-higher finding*
+  *and* pass agreement. Anything ambiguous falls to `suspicious` or `malicious`.
+- **A lone `low` returns `safe`** — deliberate, and why the gate is "no medium-or-higher"
+  rather than "zero findings". L1 assigns `low` only to weak signals, and `safe` still
+  demands pass agreement. This avoids over-quarantining benign deploy skills (a real deploy
+  skill legitimately contains `curl` + a token reference).
 - **Only `safe` skills are installable.** `suspicious | malicious` → quarantine, never
   written to the live skills folder. The gate is enforced once, on the host verdict —
   never on a model-emitted label.
@@ -193,8 +196,9 @@ State these plainly; they're the OWASP/NCSC posture and a strength, not a weakne
 
 - **Why / derivation:** `…/07-Research-Synthesis/_synthesis/detection-engine.md` (sources,
   benchmarks, reconciliation, the verbatim auditor system prompt + 3 few-shots).
-- **Finding types & schema:** the auditor prompt + JSON schema in `detection-engine.md`;
-  the `type`/`Severity`/`Risk` enums in `packages/shared/types.ts`.
+- **Finding types & schema:** the auditor prompt + JSON schema in `detection-engine.md`
+  (the frozen 13-type set); the `Severity`/`Risk` enums in `packages/shared/types.ts`
+  (`Finding.type` there is `string`).
 - **L1 regex detectors:** `apps/api/src/lib/prefilter.ts` (+ `prefilter/{override,obfusc,exfil}.ts`).
 - **L3 auditor + transport:** `apps/api/src/lib/openrouter.ts`, orchestration in `audit.ts`.
 - **The gate:** `apps/api/src/lib/score.ts` (`scoreRisk`).

@@ -29,7 +29,7 @@ The API is currently open — no workspace token needed. `JENZ_API` defaults to 
 mock (`http://localhost:8787/api`) if unset, so set it to the live API for a real audit.
 
 ## Env
-- `JENZ_API` — API base (default `http://localhost:8787/api`). Flip to Jo's URL when live.
+- `JENZ_API` — API base (default `http://localhost:8787/api`). Set to `https://api.jenz.ai/api` for the live API.
 - `JENZ_WORKSPACE` — workspace token sent as `x-jenz-workspace` (default `demo`).
 
 ## Smoke test (end-to-end gate proof)
