@@ -17,7 +17,7 @@ An MCP server (`@jenz/mcp`) that lets a coding agent (Claude Code first) **submi
 | D2 | **Thin HTTP client.** MCP only ever talks HTTP to `JENZ_API`. | Keeps the gate server-side and the MCP swappable from mock → Jo's real API with **no MCP code change** (flip one env var). |
 | D3 | **Local mock returns canned `AuditedSkill` verdicts.** No `auditSkill()` import. | `@jenz/api` exposes no library entry — importing it would boot the Hono server (side effect) or fail to resolve; a clean import would need a cross-lane export from Natnael. The MCP is a thin relay and does **not** need real detection to be built/tested; it needs the right route shapes + the real 403 gate. Real verdicts arrive for free by pointing `JENZ_API` at the live API. Canned keeps Remi's lane self-contained and tests deterministic. |
 | D4 | **Outputs reuse `@jenz/shared` types + `structuredContent`.** | Single source of truth for `AuditedSkill`/`Finding` — no second, drifting definition. The agent gets validated structured data plus human-readable text. |
-| D5 | **Skill identifier is an opaque string** echoed from the API. | The MCP never constructs ids; whatever `import` returns is handed to `audit`/`get`/`pull`. Decouples us from whether Jo keys on `slug` or a uuid. (Mock uses `slug` as the id; flag to Jo that his path `:id` should accept whatever `import` returns.) |
+| D5 | **Skill identifier is an opaque string** echoed from the API. | The MCP never constructs ids; whatever `import` returns is handed to `get`/`pull`. Decouples us from whether Jo keys on `slug` or a uuid. (Mock uses `slug` as the id; flag to Jo that his path `:id` should accept whatever `import` returns.) |
 | D6 | **SDK = `@modelcontextprotocol/sdk` v1.x (stable).** | v2 is `2.0.0-alpha.2` with split packages — not for a hackathon. |
 
 ## 3. Architecture & data flow
@@ -41,7 +41,7 @@ Each tool = zod **raw-shape** `inputSchema` + a handler calling `api.ts`. Each r
 
 | Tool | Input | API calls | Structured output |
 |---|---|---|---|
-| `submit_skill` | `{ source: {type:'github',url} \| {type:'inline',name,files:[{path,content}]} }` | `import` → `audit` | `{ id, ...AuditedSkill }` (risk, findings[], description, category) |
+| `submit_skill` | `{ source: {type:'github',url} \| {type:'inline',name,files:[{path,content}]} }` | `import` (auto-audits) | `{ id, ...AuditedSkill }` (risk, findings[], description, category) |
 | `get_skill` | `{ id }` | `get` | `{ id, ...AuditedSkill }` (no files) |
 | `list_managed_skills` | `{ category?, risk?, query? }` | `list` | `{ skills: [{ id,name,risk,category,description,findingsCount }] }` |
 | `pull_skill` ← **gated** | `{ id }` | `files` | discriminated union on `ok` (see §5) |
@@ -80,8 +80,7 @@ Typed `fetch` wrapper. Base URL + workspace token from env:
 const BASE = process.env.JENZ_API ?? 'http://localhost:8787/api';
 const WS   = process.env.JENZ_WORKSPACE ?? 'demo';
 const h = { 'x-jenz-workspace': WS, 'Content-Type': 'application/json' };
-// import(source) POST /skills/import → { id, name }
-// audit(id)      POST /skills/:id/audit → AuditedSkill (idempotent/cached)
+// import(source) POST /skills/import → AuditedSkill + id  (auto-audits; one call, no separate /audit)
 // list(query)    GET  /skills?…  · get(id) GET /skills/:id
 // files(id)      GET  /skills/:id/files → { status, body }  // 200 {name,files} | 403 {error,risk,reason}
 ```
@@ -93,7 +92,7 @@ Node 22 global `fetch`. The `files` call returns `{ status, body }` so `pullSkil
 A tiny Hono app, in-memory `Map` as the "DB", faithfully mocking Jo's 5 routes:
 
 - `POST /api/skills/import` → store the `RawSkill`, assign `id = slug`, return `{ id, name }`.
-- `POST /api/skills/:id/audit` → return a **canned `AuditedSkill`** (poisoned fixture → `malicious` + a credential-exfil `Finding`; benign fixture → `safe`, no findings), store it. Idempotent.
+- `POST /api/skills/import` **auto-audits**: compute a **canned `AuditedSkill`** (poisoned fixture → `malicious` + a credential-exfil `Finding`; benign fixture → `safe`, no findings), store it, and return `{ id, ...AuditedSkill }`. No separate `/audit` route (matches the real API).
 - `GET /api/skills` → filter the store by `category/risk/query`.
 - `GET /api/skills/:id` → stored verdict, no files.
 - `GET /api/skills/:id/files` → **200 `{ name, files }` iff stored `risk==='safe'`, else `403 { error:'not_safe', risk, reason }`** — the gate, server-side.
@@ -139,7 +138,7 @@ Add to `apps/mcp/package.json`: `@modelcontextprotocol/sdk` (v1.x), `zod` (v3), 
 
 ## 12. Coordinate with Jo / Natnael (post to comms)
 
-- **Jo:** confirm `import` auto-audits vs separate `audit` call; confirm path `:id` accepts whatever `import` returns (opaque id); confirm the exact `/files` 403 body (`{ error, risk, reason }`).
+- **Jo:** ✅ RESOLVED (2026-06-03) — `POST /api/skills/import` **auto-audits and returns the full `AuditedSkill + id`** (so `submit_skill` is one call, no follow-up); `:id` is an opaque cuid; `/files` 403 body is `{ error:'not_safe', risk, reason }`. Mock + `submit_skill` aligned to this.
 - **Natnael:** none required for the MCP. (If we ever want real verdicts in the *mock*, he'd add a side-effect-free `@jenz/api/audit` export — out of scope now.)
 
 ## 13. Demo (Remi's half of the 3-min run)

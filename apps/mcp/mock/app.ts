@@ -40,16 +40,10 @@ app.post('/api/skills/import', async (c) => {
     raw = { slug: slugify(name), name, files: [{ path: 'SKILL.md', content: source.url }],
             source: 'github', sourceRef: source.url };
   }
-  store.set(raw.slug, { raw });
-  return c.json({ id: raw.slug, name: raw.name });
-});
-
-app.post('/api/skills/:id/audit', (c) => {
-  const id = c.req.param('id');
-  const rec = store.get(id);
-  if (!rec) return c.json({ error: 'not_found' }, 404);
-  rec.verdict ??= canned(rec.raw);
-  return c.json({ id, ...rec.verdict });
+  // Auto-audit on import (mirrors the real API): store the verdict and return the full AuditedSkill + id.
+  const verdict = canned(raw);
+  store.set(raw.slug, { raw, verdict });
+  return c.json({ id: raw.slug, ...verdict });
 });
 
 app.get('/api/skills', (c) => {

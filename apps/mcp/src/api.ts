@@ -17,7 +17,6 @@ const ok = (r: Response): Response => {
 
 export type { Source };
 export type Verdict = AuditedSkill & { id: string };
-export interface ImportResult { id: string; name: string; }
 export interface ListItem {
   id: string; name: string; risk: Risk;
   category: string; description: string; findingsCount: number;
@@ -33,14 +32,11 @@ export interface FilesResponse {
 }
 
 export const api = {
-  import: (source: Source): Promise<ImportResult> =>
+  // The API auto-audits on import and returns the full verdict (AuditedSkill + id) in one call.
+  import: (source: Source): Promise<Verdict> =>
     fetch(`${base()}/skills/import`, {
       method: 'POST', headers: headers(), body: JSON.stringify({ source }),
-    }).then(ok).then((r) => r.json() as Promise<ImportResult>),
-
-  audit: (id: string): Promise<Verdict> =>
-    fetch(`${base()}/skills/${id}/audit`, { method: 'POST', headers: headers() })
-      .then(ok).then((r) => r.json() as Promise<Verdict>),
+    }).then(ok).then((r) => r.json() as Promise<Verdict>),
 
   list: (query = ''): Promise<ListResult> =>
     fetch(`${base()}/skills${query}`, { headers: headers() })
