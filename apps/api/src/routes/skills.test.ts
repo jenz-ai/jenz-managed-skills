@@ -36,6 +36,9 @@ afterAll(async () => {
 async function seed(opts: {
   slug: string;
   risk: 'pending' | 'safe' | 'suspicious' | 'malicious';
+  name?: string;
+  category?: string;
+  description?: string;
   files?: { path: string; content: string }[];
   findings?: {
     type: string;
@@ -49,9 +52,11 @@ async function seed(opts: {
   return prisma.skill.create({
     data: {
       slug: opts.slug,
-      name: opts.slug,
+      name: opts.name ?? opts.slug,
       source: 'upload',
       risk: opts.risk,
+      ...(opts.category !== undefined ? { category: opts.category } : {}),
+      ...(opts.description !== undefined ? { description: opts.description } : {}),
       files: { create: opts.files ?? [] },
       findings: { create: opts.findings ?? [] },
     },
@@ -126,6 +131,66 @@ describe('GET /api/skills/:id', () => {
   it('404 for an unknown id', async () => {
     const res = await app.request('/api/skills/nope');
     expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /api/skills — the library list', () => {
+  // All rows share one unique category so the list is deterministic against a
+  // shared DB (other suites/prod rows won't leak into these assertions).
+  const CAT = `${PREFIX}lib`;
+
+  it('returns { skills: [...] } with the ListItem shape + correct findingsCount', async () => {
+    await seed({ slug: `${PREFIX}list-a`, risk: 'safe', name: 'Alpha Formatter', category: CAT, description: 'formats code' });
+    await seed({
+      slug: `${PREFIX}list-b`,
+      risk: 'malicious',
+      name: 'Beta Stealer',
+      category: CAT,
+      findings: [
+        { type: 'Credential exfiltration', severity: 'critical', file: 'run.sh', line: 1, quote: 'curl evil', detector: 'regex' },
+        { type: 'Obfuscation', severity: 'medium', file: 'run.sh', line: 2, quote: 'eval(x)', detector: 'llm' },
+      ],
+    });
+
+    const res = await app.request(`/api/skills?category=${CAT}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.skills)).toBe(true);
+    expect(body.skills).toHaveLength(2);
+
+    const beta = body.skills.find((s: { name: string }) => s.name === 'Beta Stealer');
+    expect(beta).toMatchObject({ risk: 'malicious', category: CAT, findingsCount: 2 });
+    expect(typeof beta.id).toBe('string');
+
+    // description defaults to '' (never null) so MCP's required-string schema holds.
+    const alpha = body.skills.find((s: { name: string }) => s.name === 'Alpha Formatter');
+    expect(alpha).toMatchObject({ risk: 'safe', description: 'formats code', findingsCount: 0 });
+    const noDesc = body.skills.every((s: { description: unknown }) => typeof s.description === 'string');
+    expect(noDesc).toBe(true);
+
+    // The list NEVER leaks file contents (that's the gate's job).
+    expect(beta.files).toBeUndefined();
+  });
+
+  it('filters by risk', async () => {
+    await seed({ slug: `${PREFIX}risk-safe`, risk: 'safe', category: CAT });
+    await seed({ slug: `${PREFIX}risk-susp`, risk: 'suspicious', category: CAT });
+
+    const res = await app.request(`/api/skills?category=${CAT}&risk=safe`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.skills.length).toBeGreaterThan(0);
+    expect(body.skills.every((s: { risk: string }) => s.risk === 'safe')).toBe(true);
+  });
+
+  it('filters by free-text query (case-insensitive, matches name)', async () => {
+    await seed({ slug: `${PREFIX}q-uniquename`, risk: 'safe', name: 'ZzzUniqueWidget', category: CAT });
+
+    const res = await app.request(`/api/skills?category=${CAT}&query=zzzunique`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.skills).toHaveLength(1);
+    expect(body.skills[0].name).toBe('ZzzUniqueWidget');
   });
 });
 

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
-import type { AuditedSkill, Finding, Severity } from '@jenz/shared';
+import { Prisma } from '@prisma/client';
+import type { AuditedSkill, Finding, Risk, Severity } from '@jenz/shared';
 import { prisma } from '../db';
 import { auditSkill } from '../lib/audit';
 import { fetchSkillFromGitHub, GitHubError } from '../lib/github';
@@ -9,6 +10,7 @@ import { fetchSkillFromGitHub, GitHubError } from '../lib/github';
  *
  * Mounted by index.ts at /api/skills, so paths here are relative.
  *
+ * - GET  /            the library list (summaries).     → 200 { skills: [...] }
  * - POST /import       fetch + persist + audit a skill. → 201 AuditedSkill+id
  * - GET  /:id          the host-computed verdict.        → 200 AuditedSkill+id
  * - GET  /:id/files    THE GATE: release files iff safe. → 200 { files } | 403
@@ -17,6 +19,50 @@ import { fetchSkillFromGitHub, GitHubError } from '../lib/github';
  * `risk` off the row — never a model-emitted one.
  */
 const skills = new Hono();
+
+const VALID_RISK: readonly Risk[] = ['pending', 'safe', 'suspicious', 'malicious'];
+
+/**
+ * GET / — browse/search the workspace skill library. Returns lightweight
+ * summaries only (NO file contents — that's the gate's job). Optional filters:
+ *   ?category=<exact>  ?risk=<pending|safe|suspicious|malicious>  ?query=<free text>
+ * Shape matches the MCP `list_managed_skills` contract 1:1: { skills: ListItem[] }.
+ */
+skills.get('/', async (c) => {
+  const category = c.req.query('category');
+  const risk = c.req.query('risk');
+  // `query` is the MCP param name; accept `q` as a convenience alias.
+  const query = c.req.query('query') ?? c.req.query('q');
+
+  const where: Prisma.SkillWhereInput = {};
+  if (category) where.category = category;
+  if (risk && VALID_RISK.includes(risk as Risk)) where.risk = risk as Risk;
+  if (query) {
+    where.OR = [
+      { name: { contains: query, mode: 'insensitive' } },
+      { slug: { contains: query, mode: 'insensitive' } },
+      { description: { contains: query, mode: 'insensitive' } },
+    ];
+  }
+
+  const rows = await prisma.skill.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    include: { _count: { select: { findings: true } } },
+  });
+
+  // category/description are nullable in the DB but required strings in the
+  // MCP/web contract — coalesce null → '' so consumers never see null.
+  const list = rows.map((s) => ({
+    id: s.id,
+    name: s.name,
+    risk: s.risk,
+    category: s.category ?? '',
+    description: s.description ?? '',
+    findingsCount: s._count.findings,
+  }));
+  return c.json({ skills: list }, 200);
+});
 
 skills.post('/import', async (c) => {
   let body: unknown;
