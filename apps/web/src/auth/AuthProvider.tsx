@@ -91,7 +91,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    supabase.auth.getSession().then(({ data }) => applySession(data.session));
+    supabase.auth.getSession().then(({ data }) => {
+      applySession(data.session);
+      // Supabase consumes the auth tokens from the URL hash on init, but can
+      // leave a bare "#" behind — strip it so the URL stays clean.
+      if (typeof window !== "undefined" && window.location.hash) {
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
+    });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       applySession(session);
     });

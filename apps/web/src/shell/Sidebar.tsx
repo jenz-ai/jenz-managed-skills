@@ -24,12 +24,14 @@ interface SidebarProps {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   onLogout: () => void;
+  workspaceName?: string;
 }
 
 export function Sidebar(props: SidebarProps) {
   const {
     view, activeCategory, skillId, skills, categories, onNav, onOpenSkill,
     onAddCategory, onAddSkill, onDropSkill, dragging, theme, onToggleTheme, onLogout,
+    workspaceName = "Workspace",
   } = props;
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [newFolder, setNewFolder] = useState(false);
@@ -216,9 +218,9 @@ export function Sidebar(props: SidebarProps) {
           </div>
         )}
         <button className={"js-ws" + (popOpen ? " open" : "")} onClick={() => setPopOpen((o) => !o)}>
-          <span className="js-ws-avatar">A</span>
+          <span className="js-ws-avatar">{(workspaceName.trim()[0] || "W").toUpperCase()}</span>
           <span className="js-ws-name">
-            Acme<span className="sub">{skills.length} skills · audited</span>
+            {workspaceName}<span className="sub">{skills.length} skills · audited</span>
           </span>
           <SIcon name="chev-up" size={14} />
         </button>

@@ -242,6 +242,7 @@ export default function App() {
           onAddCategory={addCategory} onAddSkill={addSkill} onDropSkill={moveSkill}
           dragging={dragging} onDragStart={setDragging} onDragEnd={() => setDragging(null)}
           onImport={() => setImportOpen(true)}
+          workspaceName={workspace?.name ?? "Workspace"}
           theme={theme} onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
           onLogout={() => { setScreen("onboarding"); setView("audits"); void signOut(); }}
         />
