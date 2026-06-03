@@ -27,7 +27,13 @@ interface Toast {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("onboarding");
+  // Land returning users in the app, not the wizard. Onboarding completion is
+  // remembered in localStorage (set in handleOnboardingComplete).
+  const [screen, setScreen] = useState<Screen>(() =>
+    typeof localStorage !== "undefined" && localStorage.getItem("jenz-onboarded") === "1"
+      ? "app"
+      : "onboarding",
+  );
   const [view, setView] = useState<View>("audits");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [skillId, setSkillId] = useState<string | null>(null);
@@ -96,6 +102,8 @@ export default function App() {
   const handleOnboardingComplete = (ws: string, sources: ImportSource[]) => {
     // Persist the onboarding-chosen name to the real (auth) workspace.
     if (ws && ws !== workspace?.name) void renameWorkspace({ name: ws });
+    // Remember onboarding is done so a refresh lands in the app, not the wizard.
+    try { localStorage.setItem("jenz-onboarded", "1"); } catch { /* ignore */ }
     setAuditSources(sources);
     setRunKey((k) => k + 1);
     setView("audit");
