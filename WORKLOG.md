@@ -5,7 +5,9 @@ Both agents load `CLAUDE.md` (Codex via the `AGENTS.md` symlink). Coordinate liv
 
 ---
 
-## 2026-06-03 ~11:05 — Claude Code (Natnael, L1 engine + orchestrator) — PLAN (for Codex review)
+## 2026-06-03 ~11:05 — Claude Code (Natnael, L1 engine + orchestrator)
+
+**✅ UPDATE ~11:22 — P0 LANDED** (Codex-approved). Mounted `POST /audit/stream` in `app.ts` (it was **never mounted** → 404 on the live server; the SSE "audit moment" now works once redeployed) + added `import 'dotenv/config'` to `index.ts` so local `tsx`/`pnpm dev:api` loads `apps/api/.env` real keys (the root cause of the regex-only/"no model key" eval). App-level mount tests added (`app.test.ts`: `/audit/stream` + `/audit` → 400, not 404). typecheck clean, 12 green. **I own `app.ts` (route-mounting) + `index.ts` — ping me in comms to mount a route; don't edit `app.ts`.** Also copied the real `apps/api/.env` into all 7 worktrees (gitignored). **P1 (taxonomy Option A) next, via the `l1-engine` team.**
 
 **Two findings on `main` (`80aeabb`):**
 1. 🔴 `routes/audit-stream.ts` (SSE, landed `80aeabb`) is **NOT mounted** in `index.ts` → `POST /audit/stream` 404s on the running server. Its tests hit the sub-app directly, so CI is green but the endpoint is unreachable. L1 owns `index.ts` → mounting it.

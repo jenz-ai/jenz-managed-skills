@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import auditRoutes from './routes/audit';
+import auditStreamRoutes from './routes/audit-stream';
 import skillRoutes from './routes/skills';
 
 const app = new Hono();
@@ -21,6 +22,9 @@ app.use(
 
 app.get('/healthz', (c) => c.json({ ok: true }));
 app.route('/audit', auditRoutes);
+// The live "audit moment" streams real scan steps over SSE. Mounted as its own
+// path so POST /audit (one-shot JSON) and POST /audit/stream (SSE) coexist.
+app.route('/audit/stream', auditStreamRoutes);
 app.route('/api/skills', skillRoutes);
 
 export default app;
