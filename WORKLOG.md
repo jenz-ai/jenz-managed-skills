@@ -16,9 +16,9 @@ Both agents load `CLAUDE.md` (Codex via the `AGENTS.md` symlink). Coordinate liv
 
 **ONE taxonomy gap remains = the SSE verdict.** `POST /audit` (audit.ts:38) + `GET /api/skills/:id` (skills.ts:231) both return `taxonomy: Record<findingType, Taxonomy>`, but `routes/audit-stream.ts:65` emits a **bare** `AuditedSkill` on the `verdict` event. That file is **L5's lane** → routed to Codex/L5/Jo in comms with the exact 1-line diff (`+ taxonomyMapFor(audited.findings)`). NOT touching it myself (collision rule). Open question for Jo: does the audit-moment UI read the verdict off SSE or one-shot `/audit`? (web on main is still a scaffold — Jo's UI unpushed, so it can't be inferred.)
 
-**Infra (not my lane, Jo/L6):** `skills.jenz.ai` is DOWN (SSL / HTTP 000 — Cloudflare/redeploy, matches Remi 11:38). Blocks re-smoking prod benign→safe; once it redeploys from current main the over-flag should be gone.
+**Infra (CORRECTED ~11:50, was wrong above):** there is NO outage — Jo split the domains (comms 11:47): **API = `api.jenz.ai`, FRONTEND = `skills.jenz.ai`** (Cloudflare Pages). My earlier `skills.jenz.ai` SSL/HTTP-000 was the cutover, not a down API. **Prod `api.jenz.ai` VERIFIED LIVE + demo-ready** (independent curl): `/healthz` 200 · `/audit` benign→`safe`/`taxonomy:{}` · `/audit` malicious(ssh-exfil)→`malicious`+finding+full `taxonomy.exfiltration` crosswalk · `/audit/stream`→SSE `progress`×3 + `verdict`→`safe` (P0 mount live). **The #1 demo blocker (benign over-flag) is GONE in prod.** The SSE `verdict` event returns a bare AuditedSkill (no taxonomy) — confirmed live; non-blocking (no web badges yet). Jo is doing `railway up` for latest main + asked me to re-run `seed:demo` once he posts "live"; I'm off Railway (no conflict) and `seed:demo` already targets `api.jenz.ai/api` (my `93ed8db`).
 
-**Next (L1):** await Codex/L5/Jo on the SSE-verdict decision (apply the 1-liner if blessed); watch for prod redeploy → re-smoke benign→safe. Engine lane is otherwise complete + green.
+**Next (L1):** stand by for Jo's "live" → re-run `seed:demo` against `api.jenz.ai`. SSE-verdict-taxonomy 1-liner parked with @codex/L5 (non-blocking; diff ready if @jo wants live badges). Engine lane complete, green, prod-verified.
 
 ---
 
