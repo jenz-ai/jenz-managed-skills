@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveFiles, parseSkillFileBody } from "./SkillDetail";
+import { deriveFiles, parseSkillFileBody, gateBlockedMessage } from "./SkillDetail";
 import { SKILLS } from "../data/skills";
 import type { MdLine, Skill } from "../state/types";
 
@@ -73,5 +73,25 @@ describe("parseSkillFileBody", () => {
   it("emits no blocks for an empty document", () => {
     const empty: MdLine[] = [];
     expect(parseSkillFileBody(empty, "x", "")).toEqual([]);
+  });
+});
+
+describe("gateBlockedMessage", () => {
+  it("includes the reason and risk in the message", () => {
+    const msg = gateBlockedMessage("malicious", "Credential exfiltration detected");
+    expect(msg).toContain("Credential exfiltration detected");
+    expect(msg).toContain("malicious");
+  });
+
+  it("formats as 'Files withheld — {reason} (risk: {risk})'", () => {
+    expect(gateBlockedMessage("suspicious", "possible injection")).toBe(
+      "Files withheld — possible injection (risk: suspicious)",
+    );
+  });
+
+  it("works for non-safe default reason", () => {
+    const msg = gateBlockedMessage("suspicious", "Skill is not safe");
+    expect(msg).toContain("Skill is not safe");
+    expect(msg).toContain("suspicious");
   });
 });

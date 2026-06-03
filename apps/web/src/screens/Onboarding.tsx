@@ -4,10 +4,13 @@
 // (folder picker scanning for SKILL.md), pulled from a GitHub repo, or pushed in
 // by a CLI agent over MCP. Steps: welcome → name → import → mcp → review.
 //
-// App.tsx passes only { onImport: startImport }. onImport(total) jumps to the
-// audit. The pure branching (steps array), the SKILL.md folder scan, the GitHub
-// repo-label parse, and the staged `total` count live in onboardingLogic.ts and
-// are unit-tested in onboardingLogic.test.ts.
+// App.tsx passes { onComplete: (workspace, sources) => void }.
+// onComplete fires on the final "Enter workspace" CTA with the workspace name
+// and the collected ImportSource[] ready for stream-auditing.
+//
+// The pure branching (steps array), the SKILL.md folder scan, the GitHub
+// repo-label parse, the staged `total` count, and buildInlineSources live in
+// onboardingLogic.ts and are unit-tested in onboardingLogic.test.ts.
 import { useRef, useState, type ComponentType, type ReactNode } from "react";
 import { registerScreen } from "../shell/ScreenSlot";
 import { SIcon, type IconName } from "../components/SIcon";
@@ -17,12 +20,14 @@ import {
   parseRepoLabel,
   scanSkillDirs,
   totalSkills,
+  buildInlineSources,
+  type ImportSource,
   type StagedGroup,
   type StepId,
 } from "./onboardingLogic";
 
 interface OnboardingProps {
-  onImport: (total: number) => void;
+  onComplete: (workspace: string, sources: ImportSource[]) => void;
 }
 
 const TOOLS = [
@@ -96,7 +101,7 @@ function Shell({ children, ...nav }: ShellNav & { children: ReactNode }) {
   );
 }
 
-function Onboarding({ onImport }: OnboardingProps) {
+function Onboarding({ onComplete }: OnboardingProps) {
   const [name, setName] = useState("");
   const [groups, setGroups] = useState<StagedGroup[]>([]);
   const [repoUrl, setRepoUrl] = useState("");
@@ -105,6 +110,10 @@ function Onboarding({ onImport }: OnboardingProps) {
     agent: null,
   });
   const [stepIdx, setStepIdx] = useState(0);
+
+  // Collected ImportSources — one per upload or github entry. MCP is excluded
+  // (MCP-pushed skills come in via the MCP server at runtime, not at onboarding).
+  const [importSources, setImportSources] = useState<ImportSource[]>([]);
 
   const folderRef = useRef<HTMLInputElement | null>(null);
   const pendingRef = useRef<{ label: string | null; sub: string } | null>(null);
@@ -143,20 +152,53 @@ function Onboarding({ onImport }: OnboardingProps) {
     pendingRef.current = { label, sub };
     folderRef.current && folderRef.current.click();
   };
-  const onFolder = (e: React.ChangeEvent<HTMLInputElement>) => {
+
+  const onFolder = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     e.target.value = "";
     const meta = pendingRef.current || { label: null, sub: "" };
     pendingRef.current = null;
     if (!files.length) return;
+
     const first = files[0] as File & { webkitRelativePath?: string };
     const root = (first.webkitRelativePath || first.name).split("/")[0] || "skills";
-    const paths = files.map((f) => (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name);
-    const names = scanSkillDirs(paths, root);
-    const skills = names.length
-      ? names.map((n) => ({ id: "sk-" + gidRef.current++ + "-" + n, name: n }))
-      : mint(root, Math.min(Math.max(files.length, 1), 4));
-    addGroup({ kind: "upload", label: meta.label || root, sub: meta.sub || root + "/", skills });
+
+    // Read each file's text content. Files that fail to read (e.g. binary) are
+    // silently skipped — buildInlineSources handles oversized/binary filtering too.
+    const fileEntries: { path: string; content: string }[] = [];
+    await Promise.all(
+      files.map(async (f) => {
+        const path = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+        try {
+          const content = await f.text();
+          fileEntries.push({ path, content });
+        } catch {
+          // skip unreadable files (binary, permissions, etc.)
+          console.warn(`[jenz] skipping unreadable file: ${path}`);
+        }
+      }),
+    );
+
+    const paths = fileEntries.map((fe) => fe.path);
+    const skillDirNames = scanSkillDirs(paths, root);
+
+    if (skillDirNames.length > 0) {
+      // Build real ImportSources with file contents
+      const newSources = buildInlineSources(fileEntries);
+      setImportSources((prev) => [...prev, ...newSources]);
+
+      const skills = skillDirNames.map((n) => ({ id: "sk-" + gidRef.current++ + "-" + n, name: n }));
+      addGroup({ kind: "upload", label: meta.label || root, sub: meta.sub || root + "/", skills });
+    } else {
+      // No SKILL.md found — mint synthetic names for display (legacy behaviour)
+      const skills = mint(root, Math.min(Math.max(files.length, 1), 4));
+      addGroup({ kind: "upload", label: meta.label || root, sub: meta.sub || root + "/", skills });
+      // For non-SKILL.md folders, use all readable files as a single inline source
+      if (fileEntries.length > 0) {
+        const source: ImportSource = { kind: "inline", name: root, files: fileEntries };
+        setImportSources((prev) => [...prev, source]);
+      }
+    }
   };
 
   const addRepo = () => {
@@ -167,6 +209,10 @@ function Onboarding({ onImport }: OnboardingProps) {
       setRepoUrl("");
       return;
     }
+    // Add a github ImportSource
+    const newSource: ImportSource = { kind: "github", url, label };
+    setImportSources((prev) => [...prev, newSource]);
+
     addGroup({
       kind: "github",
       label,
@@ -182,6 +228,7 @@ function Onboarding({ onImport }: OnboardingProps) {
     if (!groups.some((g) => g.kind === "mcp" && g.agent === agent)) {
       addGroup({ kind: "mcp", agent, label, sub: "pushed via MCP", skills: mint("mcp" + agent, 4) });
     }
+    // MCP skills are pushed at runtime via the MCP server, not collected as ImportSources here.
   };
 
   // ---- staged groups list (shared) ----
@@ -397,7 +444,7 @@ function Onboarding({ onImport }: OnboardingProps) {
       <div className="ob-foot">
         <button className="btn-secondary" onClick={back}>← Back</button>
         <span className="ob-foot-spacer" />
-        <button className="btn-primary" onClick={() => onImport(total)}>Enter workspace →</button>
+        <button className="btn-primary" onClick={() => onComplete(name || "My Workspace", importSources)}>Enter workspace →</button>
       </div>
     </Shell>
   );

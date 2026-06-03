@@ -11,6 +11,14 @@ import { TARGET_BY_ID } from "./data/targets";
 import { CATEGORIES, SKILLS, SOURCE_LABEL } from "./data/skills";
 import type { MdLine, Screen, Skill, View } from "./state/types";
 import { ScreenSlot } from "./shell/ScreenSlot";
+import { listSkills } from "./lib/api";
+import { listItemToSkill, auditedToSkill } from "./lib/adapt";
+import type { ImportSource } from "./screens/onboardingLogic";
+import type { AuditedSkill } from "@jenz/shared";
+
+// Unique, non-empty folder names across a skill set.
+const catsOf = (arr: Skill[]) =>
+  Array.from(new Set(arr.map((s) => s.category))).filter(Boolean);
 
 interface Toast {
   msg: ReactNode;
@@ -23,17 +31,41 @@ export default function App() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [skillId, setSkillId] = useState<string | null>(null);
   const [runKey, setRunKey] = useState(0);
-  const [skills, setSkills] = useState<Skill[]>(() => SKILLS.map((s) => ({ ...s })));
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [categories, setCategories] = useState<string[]>(() => CATEGORIES.slice());
   const [installs, setInstalls] = useState<Record<string, string[]>>({});
   const [toast, setToast] = useState<Toast | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [auditSources, setAuditSources] = useState<ImportSource[]>([]);
+  const [workspace, setWorkspace] = useState("Acme");
 
   useEffect(() => {
     document.body.classList.toggle("light", theme === "light");
   }, [theme]);
+
+  // Load the live skill library (GET /skills) on mount. Falls back to the
+  // bundled fixtures so the demo never shows a blank workspace if the API is
+  // unreachable — a fail-soft for the UI only (the gate stays server-side).
+  useEffect(() => {
+    let alive = true;
+    listSkills()
+      .then((items) => {
+        if (!alive) return;
+        const live = items.map(listItemToSkill);
+        setSkills(live);
+        setCategories(catsOf(live));
+      })
+      .catch(() => {
+        if (!alive) return;
+        setSkills(SKILLS.map((s) => ({ ...s })));
+        setCategories(CATEGORIES.slice());
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -55,10 +87,28 @@ export default function App() {
     setView("detail");
   };
 
-  const startImport = () => {
+  // Onboarding finished: take the user's chosen sources into the streaming
+  // audit run, then land them in the app.
+  const handleOnboardingComplete = (ws: string, sources: ImportSource[]) => {
+    setWorkspace(ws || "Acme");
+    setAuditSources(sources);
     setRunKey((k) => k + 1);
     setView("audit");
     setScreen("app");
+  };
+
+  // A streamed verdict arrived — adapt it to a web Skill and upsert into the
+  // library so it appears in its folder live (it's persisted server-side too).
+  const handleResolved = (audited: AuditedSkill & { id: string }) => {
+    const sk = auditedToSkill(audited);
+    setSkills((arr) => {
+      const i = arr.findIndex((s) => s.id === sk.id);
+      if (i === -1) return [...arr, sk];
+      const next = arr.slice();
+      next[i] = sk;
+      return next;
+    });
+    setCategories((prev) => (prev.includes(sk.category) ? prev : [...prev, sk.category]));
   };
 
   const moveSkill = (id: string, cat: string) => {
@@ -130,14 +180,22 @@ export default function App() {
     }
   };
 
-  const runImport = () => { setImportOpen(false); startImport(); };
+  // In-app re-import (the AuditHome modal). Sources aren't collected here yet,
+  // so this just opens the audit screen's ready state. Onboarding is the real
+  // streaming-import path. TODO: collect sources in the modal too.
+  const runImport = () => {
+    setImportOpen(false);
+    setAuditSources([]);
+    setRunKey((k) => k + 1);
+    setView("audit");
+  };
 
   if (screen === "onboarding") {
     return (
       <div className="js-win">
         <div className="js-shell" style={{ gridTemplateColumns: "1fr" }}>
           <div className="js-main">
-            <ScreenSlot kind="onboarding" props={{ onImport: startImport }} />
+            <ScreenSlot kind="onboarding" props={{ onComplete: handleOnboardingComplete }} />
           </div>
         </div>
       </div>
@@ -149,7 +207,7 @@ export default function App() {
       <div className="js-titlebar">
         <div className="js-title">
           <span className="js-logo"><SIcon name="shield-check" size={12} /></span>
-          jenz managed skills <span className="js-title-sub">· Acme</span>
+          jenz managed skills <span className="js-title-sub">· {workspace}</span>
         </div>
         <div className="js-titlebar-end"><SIcon name="shield-check" size={13} /> auditor online</div>
       </div>
@@ -175,7 +233,7 @@ export default function App() {
           {view === "settings" && <ScreenSlot kind="settings" props={{}} />}
           {view === "audit" && (
             <div className="js-body">
-              <ScreenSlot kind="audit" props={{ runKey, onDone: (v: View) => nav(v, null), onOpenSkill: openSkill }} />
+              <ScreenSlot kind="audit" props={{ runKey, sources: auditSources, onResolved: handleResolved, onDone: (v: View) => nav(v, null), onOpenSkill: openSkill }} />
             </div>
           )}
           {(view === "library" || view === "quarantine") && (

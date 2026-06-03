@@ -60,6 +60,29 @@ model Skill {
   updatedAt   DateTime    @updatedAt
 }
 
+/// A platform user. Identity comes from Supabase Auth — `id` is the Supabase
+/// `auth.users.id`. The dashboard authenticates requests with a Supabase JWT;
+/// the agent-facing gate/audit API stays OPEN and never touches this model.
+model User {
+  id        String     @id /// = Supabase auth.users.id (uuid)
+  email     String     @unique
+  workspace Workspace?
+  createdAt DateTime   @default(now())
+}
+
+/// A workspace, owned by exactly one user (minimal single-workspace-per-user
+/// for now — invites/multi-member are deferred). Skills are NOT scoped to a
+/// workspace yet; the audited library is shared. `slug` is used in CLI/MCP copy.
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId   String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model SkillFile {
   id      String @id @default(cuid())
   skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)

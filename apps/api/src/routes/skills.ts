@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
+import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 import { Prisma } from '@prisma/client';
 import type { AuditedSkill, Finding, RawSkill, Risk, Severity } from '@jenz/shared';
 import { prisma } from '../db';
@@ -67,6 +68,73 @@ skills.get('/', async (c) => {
   return c.json({ skills: list }, 200);
 });
 
+/**
+ * Resolve a request body to a RawSkill, or return an error + HTTP status.
+ * Shared by both `/import` (sync) and `/import/stream` (SSE) so the two paths
+ * stay identical without any code duplication.
+ *
+ * Handles three shapes:
+ *   1. {source:{type:'inline', name, files}} → build a RawSkill directly
+ *   2. {source:{type:'github', url}}         → fetch from GitHub
+ *   3. Legacy top-level {ref|url|repo}       → fetch from GitHub
+ */
+async function resolveRawSkill(
+  body: unknown,
+): Promise<{ raw: RawSkill } | { error: string; status: number }> {
+  const source =
+    body && typeof body === 'object'
+      ? (body as Record<string, unknown>).source
+      : undefined;
+
+  // 1) {source:{type:'inline', name, files}}
+  if (
+    source &&
+    typeof source === 'object' &&
+    (source as Record<string, unknown>).type === 'inline'
+  ) {
+    const s = source as Record<string, unknown>;
+    const name = typeof s.name === 'string' ? s.name.trim() : '';
+    if (!name)
+      return { error: 'inline source requires a non-empty name', status: 400 };
+    const files = parseInlineFiles(s.files);
+    if (!files)
+      return {
+        error: 'inline source requires a non-empty files array of {path, content}',
+        status: 400,
+      };
+    const slug = slugify(name);
+    if (!slug)
+      return { error: 'name does not produce a valid slug', status: 400 };
+    return { raw: { slug, name, source: 'inline', files } };
+  }
+
+  // 2) {source:{type:'github', url}} or 3) legacy top-level {ref|url|repo}
+  let ref: string | null = null;
+  if (
+    source &&
+    typeof source === 'object' &&
+    (source as Record<string, unknown>).type === 'github'
+  ) {
+    const url = (source as Record<string, unknown>).url;
+    if (typeof url !== 'string' || url.trim().length === 0)
+      return { error: 'github source requires a non-empty url string', status: 400 };
+    ref = url.trim();
+  } else {
+    ref = extractRef(body);
+  }
+  if (!ref)
+    return { error: 'ref (owner/repo[/subdir] or GitHub URL) required', status: 400 };
+
+  try {
+    const raw = await fetchSkillFromGitHub(ref);
+    return { raw };
+  } catch (e) {
+    if (e instanceof GitHubError) return { error: e.message, status: e.status };
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: `import failed: ${msg}`, status: 400 };
+  }
+}
+
 skills.post('/import', async (c) => {
   let body: unknown;
   try {
@@ -75,44 +143,120 @@ skills.post('/import', async (c) => {
     return c.json({ error: 'invalid JSON body' }, 400);
   }
 
-  const source = (body && typeof body === 'object' ? (body as Record<string, unknown>).source : undefined);
+  const result = await resolveRawSkill(body);
+  if ('error' in result) return c.json({ error: result.error }, result.status as 400);
+  return persistAuditRespond(c, result.raw);
+});
 
-  // 1) {source:{type:'inline', name, files}} → build a RawSkill directly.
-  if (source && typeof source === 'object' && (source as Record<string, unknown>).type === 'inline') {
-    const s = source as Record<string, unknown>;
-    const name = typeof s.name === 'string' ? s.name.trim() : '';
-    if (!name) return c.json({ error: 'inline source requires a non-empty name' }, 400);
-    const files = parseInlineFiles(s.files);
-    if (!files) return c.json({ error: 'inline source requires a non-empty files array of {path, content}' }, 400);
-    const slug = slugify(name);
-    if (!slug) return c.json({ error: 'name does not produce a valid slug' }, 400);
-    return persistAuditRespond(c, { slug, name, source: 'inline', files });
-  }
-
-  // 2) {source:{type:'github', url}} → fetch via GitHub.
-  // 3) LEGACY top-level {ref|url|repo} string → fetch via GitHub.
-  let ref: string | null = null;
-  if (source && typeof source === 'object' && (source as Record<string, unknown>).type === 'github') {
-    const url = (source as Record<string, unknown>).url;
-    if (typeof url !== 'string' || url.trim().length === 0) {
-      return c.json({ error: 'github source requires a non-empty url string' }, 400);
-    }
-    ref = url.trim();
-  } else {
-    ref = extractRef(body);
-  }
-  if (!ref) return c.json({ error: 'ref (owner/repo[/subdir] or GitHub URL) required' }, 400);
-
-  let raw: RawSkill;
+/**
+ * POST /import/stream — streaming, persisting import.
+ *
+ * Body identical to POST /import. Validates BEFORE opening the stream so
+ * invalid bodies get a plain JSON 400, not an SSE error. On success:
+ *   1. Persist a `pending` row.
+ *   2. Open SSE stream.
+ *   3. Run audit, emitting `progress` events live.
+ *   4. On success: update row with host-computed verdict, emit `verdict`.
+ *   5. On throw: emit `error`, leave row as `pending` (fail closed — never safe).
+ */
+skills.post('/import/stream', async (c) => {
+  let body: unknown;
   try {
-    raw = await fetchSkillFromGitHub(ref);
-  } catch (e) {
-    if (e instanceof GitHubError) return c.json({ error: e.message }, e.status as 400);
-    const msg = e instanceof Error ? e.message : String(e);
-    return c.json({ error: `import failed: ${msg}` }, 400);
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'invalid JSON body' }, 400);
   }
 
-  return persistAuditRespond(c, raw);
+  // Validate (and optionally fetch from GitHub) BEFORE the stream opens.
+  const result = await resolveRawSkill(body);
+  if ('error' in result) return c.json({ error: result.error }, result.status as 400);
+  const raw = result.raw;
+
+  // Persist as `pending` BEFORE streaming, so the id is available in the verdict event.
+  const skill = await prisma.$transaction(async (tx) => {
+    await tx.skill.deleteMany({ where: { slug: raw.slug } });
+    return tx.skill.create({
+      data: {
+        slug: raw.slug,
+        name: raw.name,
+        source: raw.source,
+        ...(raw.sourceRef ? { sourceRef: raw.sourceRef } : {}),
+        risk: 'pending',
+        contentHash: computeContentHash(raw.files),
+        files: { create: raw.files.map((f) => ({ path: f.path, content: f.content })) },
+      },
+    });
+  });
+
+  // Defeat proxy buffering — frames must arrive live.
+  c.header('X-Accel-Buffering', 'no');
+
+  return streamSSE(
+    c,
+    async (stream) => {
+      // Serialize writes through a single promise chain: onProgress is sync
+      // but writeSSE is async; the chain preserves event order and ensures all
+      // writes flush before the stream closes.
+      let chain: Promise<void> = Promise.resolve();
+      const emit = (event: string, dataObj: unknown): Promise<void> => {
+        chain = chain.then(() =>
+          stream.writeSSE({ event, data: JSON.stringify(dataObj) }),
+        );
+        return chain;
+      };
+
+      try {
+        const audited = await auditSkill(raw, (message) => {
+          void emit('progress', { message });
+        });
+
+        // Host-computed verdict: update the row, then stream the result.
+        await prisma.skill.update({
+          where: { id: skill.id },
+          data: {
+            risk: audited.risk,
+            ...(audited.description !== undefined ? { description: audited.description } : {}),
+            ...(audited.category !== undefined ? { category: audited.category } : {}),
+            findings: {
+              create: audited.findings.map((f) => ({
+                type: f.type,
+                severity: f.severity,
+                file: f.file,
+                line: f.line,
+                quote: f.quote,
+                detector: f.detector,
+              })),
+            },
+          },
+        });
+
+        await emit('verdict', {
+          id: skill.id,
+          slug: audited.slug,
+          name: audited.name,
+          risk: audited.risk,
+          findings: audited.findings,
+          ...(audited.description !== undefined ? { description: audited.description } : {}),
+          ...(audited.category !== undefined ? { category: audited.category } : {}),
+          taxonomy: taxonomyMapFor(audited.findings),
+        });
+      } catch {
+        // Fail closed: a thrown audit yields an error event, never a verdict.
+        // Generic message — internals are never leaked to the client.
+        await emit('error', { error: 'audit failed' });
+      } finally {
+        // Drain the chain so nothing queued is dropped.
+        await chain;
+      }
+    },
+    // Fallback: streamSSE surfaced an error while running the callback.
+    async (_e: Error, stream: SSEStreamingApi) => {
+      await stream.writeSSE({
+        event: 'error',
+        data: JSON.stringify({ error: 'audit failed' }),
+      });
+    },
+  );
 });
 
 /**
