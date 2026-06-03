@@ -243,6 +243,8 @@ httpServer.listen(PORT, '0.0.0.0', () => {
 
 **Gotchas (ESM):** keep `.js` suffixes on every relative import + the SDK subpath (`'@modelcontextprotocol/sdk/server/streamableHttp.js'`); `@jenz/shared` stays an `import type` (dev-only, erased — never shipped); `JENZ_API` **defaults to the local mock** (`api.ts:4`), so the hosted service **must** set `JENZ_API=https://api.jenz.ai/api`.
 
+> **⚠️ Inherited contract drift (fix before the wrapper works) — flagged live by codex-audit.** The API now returns a **`taxonomy`** field on `GET /api/skills/:id`, but the MCP's `auditedShape` (`schemas.ts:26-34`) doesn't declare it, so the SDK's **strict `outputSchema` validation throws** *"Structured content does not have additional properties"* on `get_skill` (against the live API today). `list_managed_skills` + `pull_skill` (the gate) are unaffected. The remote wrapper reuses `schemas.ts` verbatim → it **inherits this bug**. **Fix once, fixes both:** add `taxonomy: z.record(z.any()).optional()` to `auditedShape` (or strip `taxonomy` before `structuredContent` in `tools/get.ts`). This is Remi's `apps/mcp` lane.
+
 ---
 
 ## 2. The SDK transport (`@modelcontextprotocol/sdk@1.29.0`, pinned)
@@ -336,11 +338,22 @@ Audit = 2 model passes (~25 s each, bounded by `AUDIT_TIMEOUT_MS`) ≈ ~50 s ⇒
   3. **Daily spend ceiling** — global imports/day (or token-cost) counter → clean "audit capacity reached" when exceeded.
   - Plus: refuse oversize pre-audit (`413`), global audit concurrency cap (semaphore N≈4), keep the 25 s per-pass timeout, lock `CORS_ORIGINS` in prod, no secrets in logs.
 
-### 6c. Production — OAuth (DCR/CIMD) reusing **Supabase**, per-user workspaces
-- **claude.ai OAuth facts:** callback `https://claude.ai/api/mcp/auth_callback`; **PKCE S256 mandatory**; spec **2025-11-25**; registration via **DCR** (RFC 7591) or **CIMD** (preferred at scale) or **Anthropic-held creds** (email `mcp-review@anthropic.com`) or the UI Advanced-settings Client ID/Secret; refresh-token rotation required (Claude = public client); discovery via Protected-Resource/AS metadata whose `resource` matches the MCP URL.
-- **The jenz shape:** we already have an IdP — **Supabase Auth** (GitHub/Google social + magic link; `Login.tsx`, `lib/supabase.ts`), and the API already validates a **Supabase JWT** via `requireAuth`. So the production connector = the remote MCP advertises OAuth AS/Protected-Resource metadata and **delegates login to Supabase**, then forwards the user's **Supabase JWT** as `Authorization: Bearer` to `api.jenz.ai` → existing `requireAuth` validates it → **per-user workspace**.
-- **Required scoped change to make it real:** today the skill/gate routes ignore auth + workspace. To get true per-user isolation, add (optional→required) JWT auth on `/api/skills/*` and **scope every skill query/insert by `workspaceId`** (`routes/skills.ts`). Until then, per-user workspaces are aspirational and the shared `demo` table is a known limitation.
-- **Shortcut:** Cloudflare Workers `workers-oauth-provider`/`McpAgent` (Option 2) gives most of this OAuth machinery out of the box — the natural home for the productionized connector.
+### 6c. Production — OAuth via **Supabase OAuth 2.1 Server**, per-user workspaces
+
+**Supabase is a turnkey OAuth 2.1 Authorization Server built for MCP** (beta, free, all plans) — we do **not** build our own AS. It serves `…/auth/v1/oauth/{authorize,token}`, JWKS `…/auth/v1/.well-known/jwks.json`, **DCR** (flag `allow_dynamic_registration`), PKCE S256, refresh rotation. Its access token is a **standard Supabase JWT**, so the existing `requireAuth` (`supabase-auth.ts:22`, `GET /auth/v1/user`) validates it **unchanged** — *provided `aud` stays `"authenticated"`*. *(supabase.com/docs/guides/auth/oauth-server/mcp-authentication)*
+
+**⚠️ The load-bearing claude.ai constraint — Anthropic issue #82 (closed "not planned").** claude.ai's connector **ignores an external IdP's metadata**: it fetches `/.well-known/oauth-authorization-server` but then **constructs `/authorize` + `/token` from the MCP server's own base URL** and **strips `registration_endpoint` to `/register`** (it still implements the 2025-03-26 auth spec). So we **cannot** point Claude straight at Supabase's endpoints — the remote MCP **must front Supabase with OAuth proxy routes at its own root**:
+- `GET /.well-known/oauth-protected-resource` (**RFC 9728, at the ROOT** — *path trap: if this 404s the OAuth flow never starts*) → `{ resource: "<canonical MCP URL>", authorization_servers: ["https://<ref>.supabase.co/auth/v1"] }`; return `401` + `WWW-Authenticate: Bearer resource_metadata="…"` on unauthed calls.
+- `GET /authorize` → **302** to Supabase `…/auth/v1/oauth/authorize`, forwarding all params (incl. PKCE `code_challenge` + `code_challenge_method=S256`).
+- `POST /token` → proxy to Supabase `…/auth/v1/oauth/token` verbatim (accept `application/x-www-form-urlencoded`).
+- `POST /register` → only if using DCR; **prefer pre-registering one static "Claude" client and skipping DCR** (more reliable; sidesteps the path-strip). If DCR, forward to Supabase.
+- Register Claude's callback **`https://claude.ai/api/mcp/auth_callback`** as a redirect URI on the Supabase client. Keep **`aud="authenticated"`** in the first cut (changing `aud` for RFC 8707 resource-binding breaks `GET /auth/v1/user` — defer it; tenancy comes from the token's `sub`/`client_id` + workspace scoping below).
+
+**Per-user-workspace payoff + the scoped code change.** Once the user's Supabase JWT flows on every MCP call, add a **graceful `attachWorkspace` middleware** on `/api/skills/*` (Bearer → `getSupabaseUser` → `ensureUserWorkspace` → `c.set('workspaceId', …)`; **no token → `'demo'`**, preserving the open demo path) and **scope every skill query/insert by `workspaceId`** in `routes/skills.ts` (+ an additive `workspaceId` column — Jo's Prisma lane). Today those routes ignore auth + workspace, so isolation is *cosmetic* — this is the change that makes *"each Claude user gets their own gated skill workspace, same GitHub login as the dashboard"* real, and lets the abuse guardrails key off `workspaceId` (durable) instead of IP (spoofable).
+
+**Don't demo OAuth cold.** claude.ai connector OAuth has open reliability issues (#199 `start_error`, #240 missing-Authorization-header). Validate the full Claude→Supabase round-trip early; keep **authless** the on-stage default.
+
+**Shortcut:** Cloudflare Workers `workers-oauth-provider`/`McpAgent` (Option 2) bakes in most of these proxy + metadata routes — the natural home for the productionized OAuth connector.
 
 ---
 
