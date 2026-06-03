@@ -1,3 +1,5 @@
+import type { Taxonomy } from '@jenz/shared';
+
 /**
  * Maps a finding `type` string to the standards IDs it implicates
  * (OWASP LLM Top 10, OWASP Agentic, OWASP Skills, MITRE ATLAS) for the
@@ -7,12 +9,9 @@
  * exists (hidden-unicode, obfuscation), `mitreAtlas` is intentionally [].
  */
 
-export interface Taxonomy {
-  owaspLlm: string[];
-  owaspAgentic: string[];
-  owaspSkills: string[];
-  mitreAtlas: string[];
-}
+// `Taxonomy` now lives in @jenz/shared (so the web UI can type-check badges).
+// Re-export keeps existing `import { Taxonomy } from './taxonomy'` consumers working.
+export type { Taxonomy };
 
 /** Frozen, all-empty result for unknown/unmapped finding types. */
 const EMPTY: Taxonomy = Object.freeze({
@@ -110,4 +109,24 @@ const TAXONOMY: Readonly<Record<string, Taxonomy>> = Object.freeze({
  */
 export function taxonomyFor(type: string): Taxonomy {
   return TAXONOMY[type] ?? EMPTY;
+}
+
+/**
+ * Builds the response-boundary crosswalk for a finding set: `{ [type]: Taxonomy }`
+ * for each distinct finding `type` that maps to at least one standard. Types with no
+ * mapping (e.g. non-canonical model labels) are omitted — the UI simply shows no badge.
+ * Pure + host-side; computed at serialization, never persisted.
+ */
+export function taxonomyMapFor(
+  findings: readonly { type: string }[],
+): Record<string, Taxonomy> {
+  const map: Record<string, Taxonomy> = {};
+  for (const f of findings) {
+    if (f.type in map) continue;
+    const t = taxonomyFor(f.type);
+    if (t.owaspLlm.length || t.owaspAgentic.length || t.owaspSkills.length || t.mitreAtlas.length) {
+      map[f.type] = t;
+    }
+  }
+  return map;
 }

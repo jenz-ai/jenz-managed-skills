@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { taxonomyFor } from './taxonomy';
+import { taxonomyFor, taxonomyMapFor } from './taxonomy';
 
 describe('taxonomyFor (finding type → standards crosswalk)', () => {
   it('maps instruction-override across all four standards', () => {
@@ -53,5 +53,23 @@ describe('taxonomyFor (finding type → standards crosswalk)', () => {
       owaspSkills: [],
       mitreAtlas: [],
     });
+  });
+});
+
+describe('taxonomyMapFor (response-boundary crosswalk map)', () => {
+  it('keys the map by distinct mapped finding type, dropping duplicates + unmapped types', () => {
+    const map = taxonomyMapFor([
+      { type: 'exfiltration' },
+      { type: 'exfiltration' }, // duplicate → one entry
+      { type: 'credential-access' },
+      { type: 'nonsense' }, // unmapped → omitted
+    ]);
+    expect(Object.keys(map).sort()).toEqual(['credential-access', 'exfiltration']);
+    expect(map.exfiltration.owaspLlm).toEqual(['LLM02', 'LLM06']);
+    expect(map['credential-access'].mitreAtlas).toEqual(['AML.T0055', 'AML.T0037']);
+  });
+
+  it('returns an empty object for no findings', () => {
+    expect(taxonomyMapFor([])).toEqual({});
   });
 });

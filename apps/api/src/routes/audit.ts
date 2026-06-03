@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { RawSkill } from '@jenz/shared';
 import { auditSkill } from '../lib/audit';
+import { taxonomyMapFor } from '../lib/taxonomy';
 
 /**
  * POST /audit — audit a skill bundle for prompt injection / malicious code.
@@ -32,7 +33,9 @@ audit.post('/', async (c) => {
 
   const raw = normalize(candidate as RawSkill);
   const audited = await auditSkill(raw);
-  return c.json(audited, 200);
+  // Enrich at the response boundary (host-side, deterministic, never persisted):
+  // the OWASP/MITRE crosswalk keyed by finding type, for the findings UI.
+  return c.json({ ...audited, taxonomy: taxonomyMapFor(audited.findings) }, 200);
 });
 
 function validateRawSkill(x: unknown): string | null {
