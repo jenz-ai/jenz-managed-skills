@@ -5,3 +5,4 @@ import "./Audit";
 import "./SkillDetail";
 import "./Library";
 import "./AuditHome";
+import "./Onboarding";
