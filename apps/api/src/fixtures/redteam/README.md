@@ -65,8 +65,8 @@ injected by Railway — **never paste the key**:
 railway run -- bash -c 'PORT=8083 pnpm --filter @jenz/api start'   # in one shell
 railway run -- env JENZ_API=http://localhost:8083/api pnpm --filter @jenz/api seed:demo
 
-# Or against the live deploy:
-JENZ_API=https://skills.jenz.ai/api pnpm --filter @jenz/api seed:demo
+# Or against the live deploy (domain migrated 2026-06-03: api.jenz.ai, was skills.jenz.ai):
+JENZ_API=https://api.jenz.ai/api pnpm --filter @jenz/api seed:demo
 ```
 
 `AUDIT_TIMEOUT_MS` defaults to 25s/pass; bump to ~45s for headroom so a slow pass
