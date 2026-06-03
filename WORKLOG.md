@@ -5,6 +5,36 @@ Both agents load `CLAUDE.md` (Codex via the `AGENTS.md` symlink). Coordinate liv
 
 ---
 
+## 2026-06-03 ~12:20 — Claude Code (Natnael, L3 red-team fixtures — WORKER) — ⭐ CONSOLIDATED STATUS (read this first for L3)
+
+**L3 lane (demo attack fixtures + seed) is DONE, green, prod-verified, pushed.** Role: Codex = lead/router; Natnael = L3 worker. Built via a `TeamCreate` team (fx-exfil/fx-inject/fx-obfusc/seed-runner), since shut down.
+
+**✅ Shipped on main (`apps/api/src/fixtures/redteam/*` + `scripts/seed-demo.ts`, all NEW files; +1 line `package.json` seed:demo):**
+- 6 labeled `RedteamFixture` exports — each authored so the **deterministic regex prefilter ALONE** hits the expected verdict (robust to model flake; the model only ESCALATES, never downgrades). Verdict floors: benign→`safe`, exfil→`malicious`, injection→`malicious`, tool-poison→`suspicious`, obfuscated→`malicious`, borderline→`suspicious`.
+- `seed-demo.ts` (`pnpm --filter @jenz/api seed:demo`) — HTTP-only, idempotent, **severity-aware gate check** (benign must stay exactly safe; attacks must be ≥ floor). Posts Remi's canonical inline shape `{source:{type:'inline',name,files}}` → github → `{ref}`.
+- `redteam.test.ts` — **18 hermetic CI tests** pinning each fixture's regex floor (pure prefilter+scoreRisk, no network/DB).
+- `redteam/README.md` — full lane doc (floor-vs-real-model semantics, live IDs, run commands).
+
+**✅ LIVE-SEEDED to `api.jenz.ai` (single Codex-approved run): 6/6 caught + 6/6 persisted.** Library IDs for demo buttons:
+| fixture | stored | id |
+|---|---|---|
+| benign control | `safe` | `cmpxw8bqj000po22qe3sn9w77` |
+| credential exfil | `malicious` | `cmpxw8w5h000so22q1jagw9jx` |
+| prompt injection | `malicious` | `cmpxw9p16000xo22qrhwtl435` |
+| tool poisoning | `suspicious` | `cmpxwajvo0012o22qc4bnz05f` |
+| obfuscated stager | `malicious` | `cmpxwbn9c0016o22q0txtzkgh` |
+| borderline installer | `malicious` | `cmpxwc920001oo22q37284f1y` |
+
+Demo: `GET /api/skills/cmpxw8bqj000po22qe3sn9w77/files` → **200 {files}** (benign releases); any attack id → **403** no files. (Live `/audit` may show tool-poison/borderline escalate to malicious — model non-determinism; always ≥suspicious, always blocked.)
+
+**Findings handed off (full detail in `~/jenz-team-comms`):** the prod benign→suspicious over-flag was a model-pass failure (`passesHealthy=false → scoreRisk([],false)`), **fixed by L1's `f061e00` + redeploy** — benign now audits `safe` live (~8s). Prod OpenRouter key checked **read-only** = valid + funded ($49.65/$50) — never the issue; **no key handoff needed** (I retracted that earlier bad advice). Did **not** touch Railway/keys/test-rows.
+
+**🚫 NOT doing (per Codex):** Railway, key rotation/printing, repeated prod probes, test-row cleanup, folding Remi's external `agent-skills` corpus. Single prod seed already run.
+
+**Next (L3): IDLE / lane complete.** Only re-run `JENZ_API=https://api.jenz.ai/api pnpm --filter @jenz/api seed:demo` if Codex/Natnael asks (e.g. after another redeploy), and post results to comms.
+
+---
+
 ## 2026-06-03 ~12:15 — Claude Code (Natnael, L1 engine — WORKER) — ⭐ CONSOLIDATED STATUS (read this first for L1)
 
 **One-glance L1 state for any session/Codex — the audit-engine lane is DONE, green, prod-verified, pushed.** Role: **Codex = team lead/router; Natnael = L1 worker.**
