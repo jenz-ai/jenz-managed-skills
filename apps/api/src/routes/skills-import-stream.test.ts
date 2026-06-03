@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import type { AuditedSkill, RawSkill } from '@jenz/shared';
 
 vi.mock('../lib/github', () => ({
-  fetchSkillFromGitHub: vi.fn(),
+  fetchSkillsFromGitHub: vi.fn(),
   GitHubError: class extends Error {
     status: number;
     constructor(message: string, status = 400) {
@@ -26,7 +26,7 @@ vi.mock('../lib/audit', () => ({ auditSkill: vi.fn() }));
 import skills from './skills';
 import { prisma } from '../db';
 import { auditSkill } from '../lib/audit';
-import { fetchSkillFromGitHub } from '../lib/github';
+import { fetchSkillsFromGitHub } from '../lib/github';
 
 const PREFIX = 'importstream-';
 const app = new Hono().route('/api/skills', skills);
@@ -314,7 +314,7 @@ describe('POST /api/skills/import/stream — github source', () => {
       sourceRef: 'o/r',
       files: [{ path: 'SKILL.md', content: '# GH\n' }],
     };
-    vi.mocked(fetchSkillFromGitHub).mockResolvedValue(raw);
+    vi.mocked(fetchSkillsFromGitHub).mockResolvedValue([raw]);
     vi.mocked(auditSkill).mockResolvedValue({
       slug,
       name: 'GH Stream Skill',
@@ -330,16 +330,88 @@ describe('POST /api/skills/import/stream — github source', () => {
 
     expect(verdict.risk).toBe('safe');
     expect(typeof verdict.id).toBe('string');
-    expect(fetchSkillFromGitHub).toHaveBeenCalledWith('https://github.com/o/r');
+    expect(verdict.index).toBe(0);
+    expect(fetchSkillsFromGitHub).toHaveBeenCalledWith('https://github.com/o/r');
   });
 
   it('maps a GitHubError to its status as JSON (before stream opens)', async () => {
     const { GitHubError } = await import('../lib/github');
-    vi.mocked(fetchSkillFromGitHub).mockRejectedValue(new GitHubError('not found', 404));
+    vi.mocked(fetchSkillsFromGitHub).mockRejectedValue(new GitHubError('not found', 404));
 
     const res = await streamPost({ source: { type: 'github', url: 'https://github.com/o/missing' } });
     expect(res.status).toBe(404);
     expect(res.headers.get('content-type')).not.toContain('text/event-stream');
     expect((await res.json()).error).toBe('not found');
+  });
+
+  it('a multi-skill repo emits one discovered + one verdict per skill, each persisted', async () => {
+    const raws: RawSkill[] = [0, 1, 2].map((i) => ({
+      slug: `${PREFIX}multi-${i}`,
+      name: `multi-${i}`,
+      source: 'github',
+      sourceRef: `o/r/multi-${i}`,
+      files: [{ path: 'SKILL.md', content: `# multi ${i}\n` }],
+    }));
+    vi.mocked(fetchSkillsFromGitHub).mockResolvedValue(raws);
+    // Make skill #1 quarantined, the others safe — verifies per-skill verdicts.
+    vi.mocked(auditSkill).mockImplementation(async (raw) => ({
+      slug: raw.slug,
+      name: raw.name,
+      risk: raw.slug.endsWith('1') ? 'malicious' : 'safe',
+      findings: [],
+    }));
+
+    const res = await streamPost({ source: { type: 'github', url: 'https://github.com/o/r' } });
+    expect(res.status).toBe(200);
+
+    const frames = parseSSE(await res.text());
+    const discovered = JSON.parse(frames.find((f) => f.event === 'discovered')!.data ?? 'null');
+    expect(discovered.total).toBe(3);
+    expect(discovered.skills.map((s: { index: number }) => s.index)).toEqual([0, 1, 2]);
+
+    const verdicts = frames
+      .filter((f) => f.event === 'verdict')
+      .map((f) => JSON.parse(f.data ?? 'null'));
+    expect(verdicts).toHaveLength(3);
+    expect(verdicts.map((v) => v.index).sort()).toEqual([0, 1, 2]);
+    expect(verdicts.find((v) => v.index === 1).risk).toBe('malicious');
+    expect(verdicts.filter((v) => v.risk === 'safe')).toHaveLength(2);
+
+    // Each skill persisted as its own row with the host verdict.
+    for (const v of verdicts) {
+      const row = await prisma.skill.findUnique({ where: { id: v.id } });
+      expect(row).not.toBeNull();
+      expect(row!.risk).toBe(v.risk);
+    }
+  });
+
+  it('one skill failing audit does not abort the others (per-skill fail-closed)', async () => {
+    const raws: RawSkill[] = [0, 1].map((i) => ({
+      slug: `${PREFIX}partial-${i}`,
+      name: `partial-${i}`,
+      source: 'github',
+      sourceRef: `o/r/partial-${i}`,
+      files: [{ path: 'SKILL.md', content: `# p ${i}\n` }],
+    }));
+    vi.mocked(fetchSkillsFromGitHub).mockResolvedValue(raws);
+    vi.mocked(auditSkill).mockImplementation(async (raw) => {
+      if (raw.slug.endsWith('0')) throw new Error('model timeout');
+      return { slug: raw.slug, name: raw.name, risk: 'safe', findings: [] };
+    });
+
+    const res = await streamPost({ source: { type: 'github', url: 'https://github.com/o/r' } });
+    const frames = parseSSE(await res.text());
+
+    const errors = frames.filter((f) => f.event === 'error').map((f) => JSON.parse(f.data ?? 'null'));
+    const verdicts = frames.filter((f) => f.event === 'verdict').map((f) => JSON.parse(f.data ?? 'null'));
+    expect(errors).toHaveLength(1);
+    expect(errors[0].index).toBe(0);
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0].index).toBe(1);
+    expect(verdicts[0].risk).toBe('safe');
+
+    // The failed skill's row stays pending (fail closed); never safe.
+    const failed = await prisma.skill.findFirst({ where: { slug: `${PREFIX}partial-0` } });
+    expect(failed!.risk).toBe('pending');
   });
 });

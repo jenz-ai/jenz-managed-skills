@@ -4,7 +4,7 @@ import type { AuditedSkill, RawSkill } from '@jenz/shared';
 
 // Hermetic: never touch the real GitHub fetcher or the real audit engine.
 vi.mock('../lib/github', () => ({
-  fetchSkillFromGitHub: vi.fn(),
+  fetchSkillsFromGitHub: vi.fn(),
   GitHubError: class extends Error {
     status: number;
     constructor(message: string, status = 400) {
@@ -17,7 +17,7 @@ vi.mock('../lib/audit', () => ({ auditSkill: vi.fn() }));
 
 import skills from './skills';
 import { prisma } from '../db';
-import { fetchSkillFromGitHub } from '../lib/github';
+import { fetchSkillsFromGitHub } from '../lib/github';
 import { auditSkill } from '../lib/audit';
 
 const PREFIX = 'skillsworker-';
@@ -275,7 +275,7 @@ describe('POST /api/skills/import', () => {
         { type: 'Credential exfiltration', severity: 'critical', file: 'SKILL.md', line: 1, quote: 'steal', detector: 'llm' },
       ],
     };
-    vi.mocked(fetchSkillFromGitHub).mockResolvedValue(raw);
+    vi.mocked(fetchSkillsFromGitHub).mockResolvedValue([raw]);
     vi.mocked(auditSkill).mockResolvedValue(audited);
 
     const res = await importReq({ ref: 'o/r' });
@@ -304,10 +304,10 @@ describe('POST /api/skills/import', () => {
 
   it('does NOT assign a category/folder to a quarantined (malicious) skill', async () => {
     const slug = `${PREFIX}noquarfolder`;
-    vi.mocked(fetchSkillFromGitHub).mockResolvedValue({
+    vi.mocked(fetchSkillsFromGitHub).mockResolvedValue([{
       slug, name: 'Bad Skill', source: 'github', sourceRef: 'o/r',
       files: [{ path: 'SKILL.md', content: '# bad\n' }],
-    });
+    }]);
     // The auditor echoes the finding type as a category — must be dropped.
     vi.mocked(auditSkill).mockResolvedValue({
       slug, name: 'Bad Skill', risk: 'malicious', category: 'excessive-agency',
@@ -333,7 +333,7 @@ describe('POST /api/skills/import', () => {
   it('maps a GitHubError to its status', async () => {
     const { GitHubError } = await import('../lib/github');
     const err = new GitHubError('not found', 404);
-    vi.mocked(fetchSkillFromGitHub).mockRejectedValue(err);
+    vi.mocked(fetchSkillsFromGitHub).mockRejectedValue(err);
 
     const res = await importReq({ ref: 'o/missing' });
     expect(res.status).toBe(404);
@@ -365,7 +365,7 @@ describe('POST /api/skills/import', () => {
     expect(body.findings).toEqual([]);
 
     // No GitHub fetch for inline.
-    expect(fetchSkillFromGitHub).not.toHaveBeenCalled();
+    expect(fetchSkillsFromGitHub).not.toHaveBeenCalled();
 
     // auditSkill received an inline RawSkill carrying the supplied files.
     const passed = vi.mocked(auditSkill).mock.calls[0][0];
@@ -389,7 +389,7 @@ describe('POST /api/skills/import', () => {
     expect((await gate.json()).files).toEqual([{ path: 'SKILL.md', content: '# Inline\n' }]);
   });
 
-  it('github source: fetches via fetchSkillFromGitHub and audits', async () => {
+  it('github source: fetches via fetchSkillsFromGitHub and audits', async () => {
     const slug = `${PREFIX}gh-source`;
     const raw: RawSkill = {
       slug,
@@ -399,7 +399,7 @@ describe('POST /api/skills/import', () => {
       files: [{ path: 'SKILL.md', content: '# GH\n' }],
     };
     const audited: AuditedSkill = { slug, name: 'GH Source Skill', risk: 'safe', findings: [] };
-    vi.mocked(fetchSkillFromGitHub).mockResolvedValue(raw);
+    vi.mocked(fetchSkillsFromGitHub).mockResolvedValue([raw]);
     vi.mocked(auditSkill).mockResolvedValue(audited);
 
     const res = await importReq({ source: { type: 'github', url: 'https://github.com/o/r' } });
@@ -407,7 +407,7 @@ describe('POST /api/skills/import', () => {
     const body = await res.json();
     expect(body.slug).toBe(slug);
     expect(body.risk).toBe('safe');
-    expect(fetchSkillFromGitHub).toHaveBeenCalledWith('https://github.com/o/r');
+    expect(fetchSkillsFromGitHub).toHaveBeenCalledWith('https://github.com/o/r');
   });
 
   it('400 when inline source is missing files', async () => {

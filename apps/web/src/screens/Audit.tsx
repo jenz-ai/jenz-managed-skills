@@ -88,15 +88,20 @@ interface RowDisplay {
 }
 
 function Audit({ onDone, onOpenSkill, runKey, sources, onResolved }: AuditProps) {
-  const total = sources.length;
+  // Completion is tracked per SOURCE (stable count); the row total is dynamic
+  // because one GitHub source can fan out into many skills (the `discovered`
+  // event), so it can't drive the streaming effect or the done gate.
+  const sourceCount = sources.length;
 
-  // rows mirrors sources[]: one display entry per source
-  const [rows, setRows] = useState<RowDisplay[]>(() =>
-    sources.map((s) => ({ label: sourceLabel(s), ...initialRowState() })),
+  // bySource[i] holds the display rows for source i. A source starts as ONE
+  // placeholder row; a multi-skill repo replaces it with one row per skill when
+  // its `discovered` event arrives. The flattened `rows` drives counts/render.
+  const [bySource, setBySource] = useState<RowDisplay[][]>(() =>
+    sources.map((s) => [{ label: sourceLabel(s), ...initialRowState() }]),
   );
   const [started, setStarted] = useState(false);
-  // Track whether all streams have completed (resolved or errored)
-  const [doneCount, setDoneCount] = useState(0);
+  // Number of sources whose stream has fully completed.
+  const [sourcesDone, setSourcesDone] = useState(0);
 
   // Stable ref to sources so the streaming effect doesn't re-fire on re-renders
   const sourcesRef = useRef(sources);
@@ -107,20 +112,46 @@ function Audit({ onDone, onOpenSkill, runKey, sources, onResolved }: AuditProps)
   const onResolvedRef = useRef(onResolved);
   onResolvedRef.current = onResolved;
 
+  // Apply a streamed RowEvent to a single (source, skill) cell, growing the
+  // source's row list if an event arrives for an index we haven't seen yet
+  // (defensive against a missing `discovered`).
+  const applyToCell = (
+    si: number,
+    ki: number,
+    event: Parameters<typeof applyRowEvent>[1],
+  ) =>
+    setBySource((prev) => {
+      const next = prev.map((g) => g.slice());
+      const group = next[si];
+      if (!group) return prev;
+      while (group.length <= ki) {
+        group.push({ label: `skill ${group.length + 1}`, ...initialRowState() });
+      }
+      const cur = group[ki];
+      group[ki] = {
+        ...cur,
+        ...applyRowEvent(
+          { status: cur.status, scanLabel: cur.scanLabel, verdict: cur.verdict, error: cur.error },
+          event,
+        ),
+      };
+      return next;
+    });
+
   // Reset on runKey change (re-run)
   useEffect(() => {
-    setRows(
-      sourcesRef.current.map((s) => ({ label: sourceLabel(s), ...initialRowState() })),
+    setBySource(
+      sourcesRef.current.map((s) => [{ label: sourceLabel(s), ...initialRowState() }]),
     );
     setStarted(false);
-    setDoneCount(0);
+    setSourcesDone(0);
   }, [runKey]);
 
   // Stream all sources sequentially when started
   useEffect(() => {
     if (!started) return;
-    if (total === 0) {
-      setDoneCount(0);
+    if (sourceCount === 0) {
+      setSourcesDone(0);
       return;
     }
 
@@ -129,88 +160,62 @@ function Audit({ onDone, onOpenSkill, runKey, sources, onResolved }: AuditProps)
     const streamAll = async () => {
       for (let i = 0; i < sourcesRef.current.length; i++) {
         if (cancelled) break;
-        const src = sourcesRef.current[i];
-        const apiSrc = toApiSource(src);
-
-        // Mark row as scanning
-        setRows((prev) => {
-          const next = prev.slice();
-          next[i] = {
-            ...next[i],
-            ...applyRowEvent(initialRowState(), { kind: "scan-start" }),
-          };
-          return next;
-        });
+        const apiSrc = toApiSource(sourcesRef.current[i]);
 
         await streamImport(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           apiSrc as any,
           {
-            onProgress: (msg) => {
+            // The repo's full skill list — replace the placeholder with one
+            // queued row per discovered skill so all N become visible at once.
+            onDiscovered: (skills) => {
               if (cancelled) return;
-              setRows((prev) => {
-                const next = prev.slice();
-                next[i] = {
-                  ...next[i],
-                  ...applyRowEvent(
-                    { status: next[i].status, scanLabel: next[i].scanLabel, verdict: next[i].verdict, error: next[i].error },
-                    { kind: "progress", msg },
-                  ),
-                };
+              setBySource((prev) => {
+                const next = prev.map((g) => g.slice());
+                next[i] = skills.map((sk) => ({ label: sk.name, ...initialRowState() }));
                 return next;
               });
+            },
+            onProgress: (index, msg) => {
+              if (cancelled) return;
+              applyToCell(i, index, { kind: "progress", msg });
             },
             onVerdict: (v) => {
               if (cancelled) return;
-              setRows((prev) => {
-                const next = prev.slice();
-                next[i] = {
-                  ...next[i],
-                  ...applyRowEvent(
-                    { status: next[i].status, scanLabel: next[i].scanLabel, verdict: next[i].verdict, error: next[i].error },
-                    { kind: "verdict", verdict: v },
-                  ),
-                };
-                return next;
-              });
+              applyToCell(i, v.index ?? 0, { kind: "verdict", verdict: v });
               onResolvedRef.current(v);
             },
-            onError: (err) => {
+            onError: (index, err) => {
               if (cancelled) return;
-              setRows((prev) => {
-                const next = prev.slice();
-                next[i] = {
-                  ...next[i],
-                  ...applyRowEvent(
-                    { status: next[i].status, scanLabel: next[i].scanLabel, verdict: next[i].verdict, error: next[i].error },
-                    { kind: "error", error: err },
-                  ),
-                };
-                return next;
-              });
+              applyToCell(i, index, { kind: "error", error: err });
             },
           },
         );
 
         if (!cancelled) {
-          setDoneCount((c) => c + 1);
+          setSourcesDone((c) => c + 1);
         }
       }
     };
 
     streamAll().catch(() => {
       // Surface unexpected errors as done (all remaining rows stay in their current state)
-      if (!cancelled) setDoneCount(sourcesRef.current.length);
+      if (!cancelled) setSourcesDone(sourcesRef.current.length);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [started, total]);
+  }, [started, sourceCount]);
+
+  // Flatten the per-source rows for counts + render. `total` is the live skill
+  // count, which grows as repos reveal their skills via `discovered`.
+  const rows = bySource.flat();
+  const total = rows.length;
 
   const statuses = rowStatuses(rows.map((r) => ({ status: r.status, scanLabel: r.scanLabel, verdict: r.verdict, error: r.error })));
   const resolved = resolvedCount(statuses);
-  const done = started && doneCount >= total && total > 0;
+  const done = started && sourcesDone >= sourceCount && sourceCount > 0;
   const counts = deriveCounts(statuses);
   const pct = derivePct(resolved, total);
   const threats = threatCount(counts);

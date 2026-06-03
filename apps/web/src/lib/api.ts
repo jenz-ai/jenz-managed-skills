@@ -194,15 +194,28 @@ export async function getSkillFiles(id: string): Promise<SkillFile[]> {
   return body.files;
 }
 
+/** One entry in the `discovered` event: a skill the import found, by index. */
+export interface DiscoveredSkill {
+  index: number;
+  slug: string;
+  name: string;
+}
+
 /**
  * POST /skills/import/stream
  *
  * Opens an SSE stream via fetch (EventSource can't POST).
  * Reads `response.body` with a ReadableStream reader + TextDecoder, parsing
  * SSE frames and dispatching to the appropriate handler:
- *   - `event: progress` → `onProgress(data.message)`
- *   - `event: verdict`  → `onVerdict(data)`
- *   - `event: error`    → `onError(data.error)`
+ *   - `event: discovered` → `onDiscovered(data.skills)` — the full skill list
+ *   - `event: progress`   → `onProgress(data.index, data.message)`
+ *   - `event: verdict`    → `onVerdict(data)` — data carries `index`
+ *   - `event: error`      → `onError(data.index, data.error)`
+ *
+ * A single GitHub repo can contain multiple skills; each streamed event carries
+ * the 0-based `index` (matching the `discovered` list) so the caller can route
+ * it to the right row. Single-skill imports use index 0. Frames missing an
+ * index default to 0 (back-compat with the pre-fan-out server).
  *
  * Resolves when the stream closes normally.
  * On non-2xx initial response: calls `onError` with the body's error field.
@@ -210,9 +223,10 @@ export async function getSkillFiles(id: string): Promise<SkillFile[]> {
 export async function streamImport(
   source: ImportSource,
   handlers: {
-    onProgress: (msg: string) => void;
-    onVerdict: (v: AuditedSkill & { id: string; taxonomy?: Record<string, Taxonomy> }) => void;
-    onError: (err: string) => void;
+    onDiscovered?: (skills: DiscoveredSkill[]) => void;
+    onProgress: (index: number, msg: string) => void;
+    onVerdict: (v: AuditedSkill & { id: string; index: number; taxonomy?: Record<string, Taxonomy> }) => void;
+    onError: (index: number, err: string) => void;
   },
 ): Promise<void> {
   const res = await fetch(buildUrl("/skills/import/stream"), {
@@ -233,7 +247,8 @@ export async function streamImport(
     } catch {
       // ignore
     }
-    handlers.onError(errMsg);
+    // No skill was discovered yet — attribute the failure to the first row.
+    handlers.onError(0, errMsg);
     return;
   }
 
@@ -258,14 +273,24 @@ export async function streamImport(
 
     const frames = parseSseFrames(complete);
     for (const frame of frames) {
-      if (frame.event === "progress") {
-        handlers.onProgress((frame.data as { message: string }).message);
+      if (frame.event === "discovered") {
+        handlers.onDiscovered?.((frame.data as { skills: DiscoveredSkill[] }).skills);
+      } else if (frame.event === "progress") {
+        const d = frame.data as { index?: number; message: string };
+        handlers.onProgress(d.index ?? 0, d.message);
       } else if (frame.event === "verdict") {
+        // Pass the verdict data through unchanged; a pre-fan-out server omits
+        // `index`, so consumers must default it to 0.
         handlers.onVerdict(
-          frame.data as AuditedSkill & { id: string; taxonomy?: Record<string, Taxonomy> },
+          frame.data as AuditedSkill & {
+            id: string;
+            index: number;
+            taxonomy?: Record<string, Taxonomy>;
+          },
         );
       } else if (frame.event === "error") {
-        handlers.onError((frame.data as { error: string }).error);
+        const d = frame.data as { index?: number; error: string };
+        handlers.onError(d.index ?? 0, d.error);
       }
     }
   }
