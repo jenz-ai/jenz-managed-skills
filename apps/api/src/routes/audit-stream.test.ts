@@ -49,6 +49,8 @@ describe('POST /audit/stream (happy path, regex-only)', () => {
     const res = await post({ raw: sampleSkill });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/event-stream');
+    // Anti-buffering header so proxies stream frames live instead of one burst.
+    expect(res.headers.get('x-accel-buffering')).toBe('no');
   });
 
   it('streams ≥1 progress event and exactly one verdict event', async () => {

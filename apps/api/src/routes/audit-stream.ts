@@ -40,6 +40,12 @@ auditStream.post('/', async (c) => {
 
   const raw = normalize(candidate as RawSkill);
 
+  // Defeat proxy / load-balancer response buffering so frames reach the client AS
+  // THEY HAPPEN. A buffered SSE stream delivers the whole audit in one burst at the
+  // end — which would silently kill the live "audit moment" in the demo. Harmless
+  // when no such proxy sits in front (e.g. local dev / direct Railway edge).
+  c.header('X-Accel-Buffering', 'no');
+
   return streamSSE(
     c,
     async (stream) => {
