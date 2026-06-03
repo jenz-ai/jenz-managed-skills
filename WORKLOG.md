@@ -5,6 +5,27 @@ Both agents load `CLAUDE.md` (Codex via the `AGENTS.md` symlink). Coordinate liv
 
 ---
 
+## 2026-06-03 ~12:15 — Claude Code (Natnael, L1 engine — WORKER) — ⭐ CONSOLIDATED STATUS (read this first for L1)
+
+**One-glance L1 state for any session/Codex — the audit-engine lane is DONE, green, prod-verified, pushed.** Role: **Codex = team lead/router; Natnael = L1 worker.**
+
+**✅ DONE + live on `api.jenz.ai` (verified by curl this session):**
+- **P0 `b143442`** — `POST /audit/stream` (SSE) mounted in `app.ts` + `dotenv` loads real keys locally.
+- **P1 `1409097`** — `POST /audit` returns `AuditedSkill.taxonomy` (OWASP-LLM/Agentic/Skills + MITRE-ATLAS via `taxonomyMapFor`).
+- **`f061e00`** — prod benign over-flag fixed IN CODE (`AUDIT_MODEL || 'deepseek/deepseek-chat'` + transient retry). **Prod benign→`safe` confirmed.**
+- Taxonomy also on **`GET /api/skills/:id`** (`62c56bc`, Jo, uses my helper) + **inline-import shape** (`497ce16`).
+- **External corpus `github.com/jenz-ai/agent-skills` validated 8/8** — incl. injection-resistance (`changelog-genie` injects the auditor → still flagged malicious) and **no false-positive** on `deploy-preview`. Read-only, no scripts executed.
+- **Reviewed `detection-measures.md` (`d8a2658`)** vs code: `scoreRisk()` gate + all 13-type standards crosswalk match **exactly**; ACK'd in comms (2 trivial doc-nits flagged to Remi).
+- **Tests: 253 pass**, `@jenz/api`+`@jenz/shared` typecheck clean. Prod live: `/audit`, `/audit/stream`, taxonomy, gate, contentHash, inline import.
+
+**🟡 OPEN (1 — non-blocking, cross-lane):** the SSE `verdict` event in `routes/audit-stream.ts` (**L5's file**) emits a bare `AuditedSkill` — no taxonomy. One-line fix ready (`+ taxonomyMapFor(audited.findings)`, mirrors `audit.ts:38` + `skills.ts:231`). Only needed IF Jo's audit-moment UI renders OWASP/MITRE badges (web renders none today). Routed to Codex/L5/Jo; **I won't touch L5's file.**
+
+**🚫 L1 is explicitly NOT doing (per Codex's 12:0x coordination):** `seed:demo` (L3 owns the single prod run) · folding the external corpus into committed fixtures (validated + documented = enough) · Railway/redeploy · any new TeamCreate pass.
+
+**▶ NOW:** standing by for real blockers from Jo's frontend live-wiring. Engine lane needs nothing further unless Jo requests the SSE badge. Domain split is settled: **API = `api.jenz.ai/api`, FRONTEND = `skills.jenz.ai`.**
+
+---
+
 ## 2026-06-03 ~12:00 — Claude Code (Natnael, L1 engine) — external corpus validated (injection-resistance proven)
 
 Validated Remi's new external corpus **`github.com/jenz-ai/agent-skills`** (8 skills, comms 11:53) against the engine — **8/8 match the triage** (local server, real key, 2-pass model):
