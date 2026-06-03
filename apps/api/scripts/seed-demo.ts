@@ -14,7 +14,7 @@
  * Run:  pnpm --filter @jenz/api seed:demo
  * Live: JENZ_API=https://skills.jenz.ai/api pnpm --filter @jenz/api seed:demo
  */
-import type { AuditedSkill } from '@jenz/shared';
+import type { AuditedSkill, RawSkill } from '@jenz/shared';
 import { redteamFixtures } from '../src/fixtures/redteam';
 
 const JENZ_API = process.env.JENZ_API ?? 'http://localhost:8083/api';
@@ -64,7 +64,7 @@ async function checkHealth(): Promise<void> {
 }
 
 /** POST /audit { raw } → the host-computed AuditedSkill (verdict ground truth). */
-async function verify(raw: AuditedSkill | unknown): Promise<AuditedSkill> {
+async function verify(raw: RawSkill): Promise<AuditedSkill> {
   const res = await fetch(auditUrl, {
     method: 'POST',
     headers,
@@ -138,11 +138,12 @@ async function main(): Promise<void> {
 }
 
 function printSummary(rows: Row[], persisted: number): void {
-  const w = (s: string, n: number) => s.padEnd(n);
+  // Pad OR truncate to a fixed width so columns line up regardless of label length.
+  const w = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s.padEnd(n));
   console.log('\n── SUMMARY ──────────────────────────────────────────────');
-  console.log(`${w('label', 34)} ${w('expected', 11)} ${w('actual', 11)} match  libId`);
+  console.log(`${w('label', 40)} ${w('expected', 10)} ${w('actual', 10)} match  libId`);
   for (const r of rows) {
-    console.log(`${w(r.label, 34)} ${w(r.expected, 11)} ${w(r.actual, 11)} ${r.match ? ' ✔ ' : ' ✘ '}   ${r.libId}`);
+    console.log(`${w(r.label, 40)} ${w(r.expected, 10)} ${w(r.actual, 10)}  ${r.match ? '✔' : '✘'}    ${r.libId}`);
   }
   const matched = rows.filter((r) => r.match).length;
   console.log('─────────────────────────────────────────────────────────');
