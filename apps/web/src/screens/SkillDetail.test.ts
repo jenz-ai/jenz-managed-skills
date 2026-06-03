@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveFiles, parseSkillFileBody, gateBlockedMessage } from "./SkillDetail";
-import { SKILLS } from "../data/skills";
+import { SKILLS } from "../data/skills.fixtures";
 import type { MdLine, Skill } from "../state/types";
 
 const byId = (id: string): Skill => {

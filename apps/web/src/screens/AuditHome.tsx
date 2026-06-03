@@ -1,28 +1,26 @@
-// Audit home / history screen. Props from App.tsx:
-//   { onImport, onOpenQuarantine }
-// Ported node-for-node from skills-history.jsx (SPEC §6). The headline stats
-// (Σ scanned, Σ threats, per-row threats) are derived by pure helpers in
-// data/auditHistory.ts and unit-tested in auditHistory.test.ts.
+// Audit home / overview screen. Props from App.tsx:
+//   { skills, onImport, onOpenQuarantine, onOpenSkill }
+// Real data only: the headline stats and the skills list are derived from the
+// live library (GET /skills, loaded in App). The former mock "recent runs" log
+// (AUDIT_HISTORY) is gone — there is no audit-run history endpoint yet, so we
+// show the audited skills themselves instead of fabricated run rows.
 import type { ComponentType } from "react";
 import { registerScreen } from "../shell/ScreenSlot";
 import { SIcon } from "../components/SIcon";
-import {
-  AUDIT_HISTORY,
-  runThreats,
-  totalScanned,
-  totalThreats,
-  trigMeta,
-} from "../data/auditHistory";
+import { RiskPill, RiskGlyph } from "../components/RiskPill";
+import { auditHomeStats } from "../data/auditStats";
+import { SOURCE_LABEL } from "../data/skills";
+import type { Skill } from "../state/types";
 
 interface AuditHomeProps {
+  skills: Skill[];
   onImport: () => void;
   onOpenQuarantine: () => void;
+  onOpenSkill: (sk: Skill) => void;
 }
 
-function AuditHome({ onImport, onOpenQuarantine }: AuditHomeProps) {
-  const scanned = totalScanned(AUDIT_HISTORY);
-  const threats = totalThreats(AUDIT_HISTORY);
-  const last = AUDIT_HISTORY[0];
+function AuditHome({ skills, onImport, onOpenQuarantine, onOpenSkill }: AuditHomeProps) {
+  const { audited, safe, threats } = auditHomeStats(skills);
 
   return (
     <div className="jh">
@@ -35,40 +33,52 @@ function AuditHome({ onImport, onOpenQuarantine }: AuditHomeProps) {
       </div>
 
       <div className="jh-stats">
-        <div className="jh-stat"><div className="jhs-v">{scanned}</div><div className="jhs-l">skills audited</div></div>
-        <div className="jh-stat"><div className="jhs-v">{AUDIT_HISTORY.length}</div><div className="jhs-l">audit runs</div></div>
+        <div className="jh-stat"><div className="jhs-v">{audited}</div><div className="jhs-l">skills audited</div></div>
+        <div className="jh-stat"><div className="jhs-v">{safe}</div><div className="jhs-l">in library</div></div>
         <button className="jh-stat danger" onClick={onOpenQuarantine}>
           <div className="jhs-v">{threats}</div><div className="jhs-l">threats caught</div>
         </button>
-        <div className="jh-stat"><div className="jhs-v sm">{last.when}</div><div className="jhs-l">last run</div></div>
       </div>
 
-      <div className="jh-sec">Recent runs</div>
-      <div className="jh-list">
-        {AUDIT_HISTORY.map((r) => {
-          const m = trigMeta(r.trigger);
-          const rowThreats = runThreats(r);
-          return (
-            <div className="jh-row" key={r.id}>
-              <span className="jh-row-ico"><SIcon name={m.icon} size={15} /></span>
-              <div className="jh-row-body">
-                <div className="jh-row-top"><b>{r.source}</b> <span className="jh-trig">{m.label}</span></div>
-                <div className="jh-row-when">{r.when} · {r.scanned} skill{r.scanned > 1 ? "s" : ""} scanned</div>
-              </div>
-              <div className="jh-row-end">
-                {rowThreats === 0
-                  ? <span className="jh-verdict ok"><SIcon name="shield-check" size={13} /> all clear</span>
-                  : <span className="jh-verdict bad"><SIcon name="shield-alert" size={13} /> {rowThreats} quarantined</span>}
-                <span className="jh-bd">
-                  <span className="jh-bd-i safe" title="safe">{r.safe}</span>
-                  {r.suspicious > 0 && <span className="jh-bd-i warn" title="suspicious">{r.suspicious}</span>}
-                  {r.malicious > 0 && <span className="jh-bd-i danger" title="malicious">{r.malicious}</span>}
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {audited === 0 ? (
+        <div className="jsl-empty">
+          <span className="je-ico"><SIcon name="shield-check" size={32} /></span>
+          <h3>No audited skills yet</h3>
+          <p>Import a folder or a GitHub repo — Jenz audits every skill before it can reach an agent.</p>
+        </div>
+      ) : (
+        <>
+          <div className="jh-sec">Audited skills</div>
+          <div className="jh-list">
+            {skills.map((sk) => {
+              const flagged = sk.risk !== "safe";
+              return (
+                <div
+                  className="jh-row"
+                  key={sk.id}
+                  onClick={() => onOpenSkill(sk)}
+                  style={{ cursor: "pointer" }}
+                >
+                  <span className="jh-row-ico"><RiskGlyph risk={sk.risk} size={15} /></span>
+                  <div className="jh-row-body">
+                    <div className="jh-row-top"><b>{sk.name}</b> <span className="jh-trig">{SOURCE_LABEL[sk.source]}</span></div>
+                    <div className="jh-row-when">
+                      {sk.category}
+                      {sk.findings.length > 0 && <> · {sk.findings.length} finding{sk.findings.length > 1 ? "s" : ""}</>}
+                    </div>
+                  </div>
+                  <div className="jh-row-end">
+                    {flagged
+                      ? <span className="jh-verdict bad"><SIcon name="shield-alert" size={13} /> quarantined</span>
+                      : <span className="jh-verdict ok"><SIcon name="shield-check" size={13} /> safe</span>}
+                    <RiskPill risk={sk.risk} sm />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -4,7 +4,6 @@
 import { useRef, useState } from "react";
 import { SIcon } from "../components/SIcon";
 import type { Skill, View } from "../state/types";
-import { AUDIT_HISTORY } from "../data/auditHistory";
 import { useOutside } from "../components/useOutside";
 
 interface SidebarProps {
@@ -71,7 +70,7 @@ export function Sidebar(props: SidebarProps) {
           >
             <span className="ji-icon"><SIcon name="scan" size={16} /></span>
             <span className="ji-label">Audits</span>
-            <span className="ji-count">{AUDIT_HISTORY.length}</span>
+            <span className="ji-count">{skills.length}</span>
           </button>
           <button
             className={"js-nav-item" + (view === "library" && !activeCategory ? " active" : "")}

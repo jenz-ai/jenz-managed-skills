@@ -9,7 +9,7 @@ import {
   findingFor,
   type RowStatus,
 } from "./Audit";
-import { SKILLS, AUDIT_ORDER } from "../data/skills";
+import { SKILLS, AUDIT_ORDER } from "../data/skills.fixtures";
 import type { Skill } from "../state/types";
 
 // These pin the streaming state machine's pure logic — the derivations the

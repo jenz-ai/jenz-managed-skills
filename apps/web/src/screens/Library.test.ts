@@ -1,7 +1,7 @@
 // Unit tests for the Library/Quarantine pure list logic (SPEC §5.3).
 import { describe, expect, it } from "vitest";
 import { filterSkills, topFinding } from "./Library";
-import { SKILLS } from "../data/skills";
+import { SKILLS } from "../data/skills.fixtures";
 import type { Skill } from "../state/types";
 
 const byId = (id: string) => SKILLS.find((s) => s.id === id)!;

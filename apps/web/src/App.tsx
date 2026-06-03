@@ -135,6 +135,8 @@ export default function App() {
     setCategories((c) => [...c, name]);
     notify(<>Folder <b>{name}</b> created</>);
   };
+  // CLIENT-SIDE ONLY: creates a local skill (unaudited). A real "new skill"
+  // should route through the import/audit pipeline + persist, not appear safe.
   const addSkill = (cat: string, name: string) => {
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "skill-" + Date.now();
     if (skills.some((s) => s.id === id)) { notify(<><b>{id}</b> already exists</>); return; }
@@ -146,6 +148,9 @@ export default function App() {
     setSkills((arr) => [...arr, { id, name: id, category: cat, source: "claude", risk: "safe", desc: "New skill — add a description.", findings: [], skillMd: md, files: 1 }]);
     notify(<>Skill <b>{id}</b> added to <b>{cat}</b></>);
   };
+  // ---- install actions ----
+  // CLIENT-SIDE ONLY: installs are kept in local state and not persisted. Needs
+  // a backend (e.g. POST /skills/:id/install + GET to hydrate) before it's real.
   const installOne = (id: string, target: string) => {
     const sk = skills.find((s) => s.id === id);
     const t = TARGET_BY_ID[target];
@@ -166,6 +171,9 @@ export default function App() {
   };
 
   // ---- quarantine actions ----
+  // CLIENT-SIDE ONLY: delete/report/rescan/approve mutate local state for the
+  // demo. Real versions need backend endpoints (DELETE /skills/:id, a verdict
+  // override/report route, a re-audit trigger) — none exist yet.
   const deleteSkill = (id: string) => {
     const sk = skills.find((s) => s.id === id);
     setSkills((arr) => arr.filter((s) => s.id !== id));
@@ -241,7 +249,7 @@ export default function App() {
           <Breadcrumb view={view} activeCategory={activeCategory} skill={skill} onNav={nav} />
           {view === "audits" && (
             <div className="js-body">
-              <ScreenSlot kind="auditHome" props={{ onImport: () => setImportOpen(true), onOpenQuarantine: () => nav("quarantine") }} />
+              <ScreenSlot kind="auditHome" props={{ skills, onImport: () => setImportOpen(true), onOpenQuarantine: () => nav("quarantine"), onOpenSkill: openSkill }} />
             </div>
           )}
           {view === "settings" && <ScreenSlot kind="settings" props={{}} />}
