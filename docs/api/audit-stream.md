@@ -13,14 +13,45 @@ score → verdict` — so the UI's "audit moment" animates from the actual pipel
 instead of faked timings. The host still computes the verdict (`scoreRisk()`);
 the model only ever contributes findings as advisory data.
 
-## Status
+## Status — live & green (single source of truth for L5)
 
 | | |
 |---|---|
-| Route file | `apps/api/src/routes/audit-stream.ts` (a Hono sub-app, handler on `POST '/'`) |
-| On `main` | ✅ yes (`80aeabb`, hardened in `169c5e3`) |
-| Mounted in `apps/api/src/app.ts` | ⏳ **L1 (Jo) owns the mount** — see [Mounting](#mounting) |
-| Live at `https://skills.jenz.ai/audit/stream` | only after the mount + redeploy |
+| Route | `apps/api/src/routes/audit-stream.ts` — Hono sub-app, handler on `POST '/'` |
+| On `main` | ✅ (`80aeabb`, hardened `169c5e3`) |
+| Mounted in `apps/api/src/app.ts` | ✅ `app.route('/audit/stream', …)` (landed `b143442`, the L1 session) |
+| Live in prod | ✅ verified — `POST /audit/stream` → SSE `progress`×3 + `verdict` → `safe` |
+| Tests / typecheck / CI | ✅ 8 lane tests + app mount test green; `tsc` clean; CI green |
+| Real-model verified | ✅ real DeepSeek via `railway run` (full prod app): benign→`safe`, malicious→`malicious` (5 findings, `llm`+`regex`), timeout→`suspicious` (fail-closed) |
+| Session | 🟢 **on standby** — no further changes unless asked (see the open item below) |
+
+### Open item (parked, L5-owned) — taxonomy on the `verdict` event
+
+`POST /audit` and `GET /api/skills/:id` return
+`taxonomy: Record<findingType, { owaspLlm, owaspAgentic, owaspSkills, mitreAtlas }>`
+(OWASP/MITRE badges). The SSE `verdict` event currently emits a **bare**
+`AuditedSkill` (no `taxonomy`). **Non-blocking** — `apps/web` renders no taxonomy
+badges yet, so the audit-moment demo doesn't need it.
+
+**Trigger to un-park:** Jo confirms the live audit-moment UI will render taxonomy
+badges off the SSE stream. Then L5 lands the additive one-liner on the verdict
+emit (mirrors `audit.ts` + `skills.ts`), nothing else changes:
+
+```ts
+import { taxonomyMapFor } from '../lib/taxonomy';
+await emit('verdict', { ...audited, taxonomy: taxonomyMapFor(audited.findings) });
+```
+
+Host-side, never persisted, does **not** touch the fail-closed / streaming logic.
+No other lane needs to edit `audit-stream.ts`.
+
+### Correction on record
+
+An earlier L5 comms claim ("Railway `OPENROUTER_API_KEY` invalid/expired") was
+**wrong — retracted.** Codex verified the key returns HTTP 200. The prod
+benign→`suspicious` over-flag was caused by `AUDIT_MODEL` being unset + old
+`openrouter.ts` throwing on a missing model; fixed by `f061e00` + Railway now
+sets `AUDIT_MODEL`. **Do not rotate the key.**
 
 ## Request
 
