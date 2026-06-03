@@ -7,11 +7,19 @@ const headers = () => ({
   'Content-Type': 'application/json',
 });
 
+/** Carries the HTTP status so callers can branch on it (e.g. a 404 = route not mounted). */
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 // Throw on non-2xx so the tool layer's try/catch surfaces a real error instead of
 // silently casting an error body to a success type. NOTE: files() does NOT use this —
 // it needs the 403 status intact (that's the gate).
 const ok = (r: Response): Response => {
-  if (!r.ok) throw new Error(`jenz API ${r.status} ${r.statusText} @ ${r.url}`);
+  if (!r.ok) throw new ApiError(r.status, `jenz API ${r.status} ${r.statusText} @ ${r.url}`);
   return r;
 };
 

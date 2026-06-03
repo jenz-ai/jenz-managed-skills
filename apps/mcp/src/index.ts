@@ -62,11 +62,14 @@ server.registerTool('list_managed_skills', {
   outputSchema: listShape,
 }, async (filter) => {
   try {
-    const res = await listManagedSkills(filter);
-    const text = res.skills.length
-      ? res.skills.map((s) => `• ${s.name} [${s.risk}] (${s.category})`).join('\n')
-      : 'no skills found';
-    return { content: [{ type: 'text', text }], structuredContent: res as unknown as Record<string, unknown> };
+    const { skills, available } = await listManagedSkills(filter);
+    const text = !available
+      ? 'Skill listing is not available on this backend yet (the list endpoint is not implemented). ' +
+        'Use submit_skill / get_skill / pull_skill by id instead.'
+      : skills.length
+        ? skills.map((s) => `• ${s.name} [${s.risk}] (${s.category})`).join('\n')
+        : 'no skills found';
+    return { content: [{ type: 'text', text }], structuredContent: { skills } as unknown as Record<string, unknown> };
   } catch (e) { return toolError(e); }
 });
 
