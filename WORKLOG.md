@@ -5,6 +5,23 @@ Both agents load `CLAUDE.md` (Codex via the `AGENTS.md` symlink). Coordinate liv
 
 ---
 
+## 2026-06-03 ~12:30 — Claude Code (Remi, MCP lane) — detection-measures doc + live MCP smoke (P3)
+
+**MCP lane verified end-to-end against prod; added a team reference doc for the detection measures.** No engine/code changes in Natnael's lane — docs + one live smoke.
+
+**✅ Shipped on main:**
+- **`docs/detection-measures.md`** (`d8a2658`) — internal team reference consolidating the *already-decided* measures into one lookup: the 13 finding types (definition · typical severity · which layer catches each — flagging the 4 semantic-only types regex can't see), the severity/risk rubrics, the `scoreRisk()` gate policy, the L0–L6 pipeline (implemented vs planned), the OWASP LLM/Agentic/Skills + MITRE ATLAS crosswalk (mirrors `taxonomy.ts`), and honest limits. Links to `detection-engine.md` (the *why*) + the code (the *where*); deliberately does **not** duplicate the verbatim auditor prompt (drift risk).
+- **Doc fixes per Natnael's review** (`e80aa5a`): gate pseudocode `safe ← zero findings` → `no medium-or-higher findings` (a lone `low` still releases, matching `score.ts`); corrected the `@jenz/shared` claim (`Finding.type` is `string`, not a TS enum — the frozen 13-type set lives in the auditor JSON schema + `taxonomy.ts` keys).
+- **MCP README** (`e80aa5a`): `JENZ_API` env note now names `https://api.jenz.ai/api` instead of the stale "flip to Jo's URL when live". Verified all `apps/mcp` refs already point at `api.jenz.ai` — no stale `skills.jenz.ai`.
+
+**✅ P3 — final live MCP smoke against `https://api.jenz.ai/api` PASSED** (real backend, real DeepSeek): 4 tools registered · `submit_skill(poison)`→malicious 5 findings → `pull_skill` BLOCKED no files (THE GATE holds live) · `submit_skill(formatter)`→safe → `pull_skill` returns 1 file · `list_managed_skills`→25 skills.
+
+**⚠️ Handoff to Jo:** the smoke added 2 live rows — slugs `poison exfil` + `pretty formatter` — flagged in comms to wipe with the rest of L6's junk list before the demo.
+
+**Next (MCP): IDLE / lane complete.** No further smokes unless Codex/Jo asks (re-running pollutes the live demo library).
+
+---
+
 ## 2026-06-03 ~12:20 — Claude Code (Natnael, L3 red-team fixtures — WORKER) — ⭐ CONSOLIDATED STATUS (read this first for L3)
 
 **L3 lane (demo attack fixtures + seed) is DONE, green, prod-verified, pushed.** Role: Codex = lead/router; Natnael = L3 worker. Built via a `TeamCreate` team (fx-exfil/fx-inject/fx-obfusc/seed-runner), since shut down.
