@@ -234,10 +234,7 @@ function Audit({ onDone, onOpenSkill, runKey, sources, onResolved }: AuditProps)
           <div className="jsa-orch-ico" aria-hidden="true">
             <span className="jsa-radar-rings">
               <span className="jsa-ring" />
-              <span className="jsa-ring" />
-              <span className="jsa-ring" />
             </span>
-            <span className="jsa-radar-sweep" />
             <span className="jsa-radar-core">
               <SIcon
                 name={done ? (threats ? "shield-alert" : "shield-check") : "scan"}
