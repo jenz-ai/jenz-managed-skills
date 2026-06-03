@@ -2,11 +2,15 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles/tokens.css";
 import "./styles/skills.css";
+import "./styles/auth.css";
 import "./screens";
-import App from "./App.tsx";
+import { AuthProvider } from "./auth/AuthProvider";
+import { AuthGate } from "./auth/AuthGate";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
   </StrictMode>,
 );

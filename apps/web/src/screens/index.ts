@@ -6,3 +6,4 @@ import "./SkillDetail";
 import "./Library";
 import "./AuditHome";
 import "./Onboarding";
+import "./Settings";

@@ -15,6 +15,7 @@ import { listSkills } from "./lib/api";
 import { listItemToSkill, auditedToSkill } from "./lib/adapt";
 import type { ImportSource } from "./screens/onboardingLogic";
 import type { AuditedSkill } from "@jenz/shared";
+import { useAuth } from "./auth/AuthProvider";
 
 // Unique, non-empty folder names across a skill set.
 const catsOf = (arr: Skill[]) =>
@@ -39,7 +40,7 @@ export default function App() {
   const [importOpen, setImportOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [auditSources, setAuditSources] = useState<ImportSource[]>([]);
-  const [workspace, setWorkspace] = useState("Acme");
+  const { workspace, signOut, renameWorkspace } = useAuth();
 
   useEffect(() => {
     document.body.classList.toggle("light", theme === "light");
@@ -90,7 +91,8 @@ export default function App() {
   // Onboarding finished: take the user's chosen sources into the streaming
   // audit run, then land them in the app.
   const handleOnboardingComplete = (ws: string, sources: ImportSource[]) => {
-    setWorkspace(ws || "Acme");
+    // Persist the onboarding-chosen name to the real (auth) workspace.
+    if (ws && ws !== workspace?.name) void renameWorkspace({ name: ws });
     setAuditSources(sources);
     setRunKey((k) => k + 1);
     setView("audit");
@@ -207,7 +209,7 @@ export default function App() {
       <div className="js-titlebar">
         <div className="js-title">
           <span className="js-logo"><SIcon name="shield-check" size={12} /></span>
-          jenz managed skills <span className="js-title-sub">· {workspace}</span>
+          jenz managed skills <span className="js-title-sub">· {workspace?.name ?? "Workspace"}</span>
         </div>
         <div className="js-titlebar-end"><SIcon name="shield-check" size={13} /> auditor online</div>
       </div>
@@ -221,7 +223,7 @@ export default function App() {
           dragging={dragging} onDragStart={setDragging} onDragEnd={() => setDragging(null)}
           onImport={() => setImportOpen(true)}
           theme={theme} onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
-          onLogout={() => { setScreen("onboarding"); setView("audits"); }}
+          onLogout={() => { setScreen("onboarding"); setView("audits"); void signOut(); }}
         />
         <div className="js-main">
           <Breadcrumb view={view} activeCategory={activeCategory} skill={skill} onNav={nav} />

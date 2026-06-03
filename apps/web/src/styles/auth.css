@@ -1,0 +1,152 @@
+/* ============================================================
+   Auth screens (Login / Create Workspace) + Settings.
+   Ported from the jenz design bundle. Token-driven — dark/light
+   both work off tokens.css. Class prefix `lg-` (login) kept from
+   the design; `set-` for settings.
+   ============================================================ */
+
+.lg-win {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+  overflow: hidden;
+}
+
+/* floating theme toggle */
+.lg-theme {
+  position: fixed;
+  top: 18px; right: 18px;
+  width: 30px; height: 30px;
+  border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--fg-3);
+  z-index: 5;
+}
+.lg-theme:hover { background: var(--bg-2); color: var(--fg-0); }
+
+/* ---------- centered stage ---------- */
+.lg-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 32px 24px 56px;
+}
+.lg-card {
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.lg-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--fg-0);
+  margin-bottom: 24px;
+}
+/* light-on-dark pupil looks larger (irradiation) — shrink it in light mode to match */
+body.light .lg-pupil { transform-box: fill-box; transform-origin: center; transform: scale(0.8); }
+
+.lg-eyebrow {
+  font-family: var(--font-ui);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 12px;
+}
+
+.lg-h1 {
+  font-size: 25px; font-weight: 600; letter-spacing: -0.015em;
+  color: var(--fg-0); margin: 0 0 9px; line-height: 1.15;
+}
+.lg-p {
+  font-size: 13.5px; color: var(--fg-2); line-height: 1.55;
+  margin: 0 0 26px; max-width: 300px; text-wrap: pretty;
+}
+
+/* button stack */
+.lg-stack { width: 100%; display: flex; flex-direction: column; gap: 9px; }
+.lg-btn {
+  height: 44px; width: 100%;
+  border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  font-family: var(--font-ui); font-size: 13.5px; font-weight: 500;
+  color: var(--fg-1); background: var(--bg-1); border: 1px solid var(--line-1);
+  transition: background .14s ease, border-color .14s ease;
+}
+.lg-btn:hover { background: var(--bg-2); border-color: var(--line-2); color: var(--fg-0); }
+.lg-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--accent-line); }
+.lg-btn:disabled { opacity: 0.6; cursor: default; }
+.lg-btn .lg-ic { width: 17px; height: 17px; display: inline-flex; flex-shrink: 0; }
+.lg-btn.primary {
+  background: var(--accent); border-color: transparent; color: #fff; font-weight: 600;
+}
+.lg-btn.primary:hover { filter: brightness(1.08); background: var(--accent); color: #fff; border-color: transparent; }
+.lg-btn.primary .lg-ic { color: #fff; }
+
+/* email form */
+.lg-form { width: 100%; display: flex; flex-direction: column; gap: 9px; }
+.lg-input {
+  height: 44px; width: 100%;
+  border-radius: 9px; padding: 0 15px;
+  background: var(--bg-1); border: 1px solid var(--line-1);
+  color: var(--fg-0); font-family: var(--font-ui); font-size: 13.5px; outline: none;
+  text-align: left;
+  transition: border-color .14s ease, background .14s ease;
+}
+.lg-input::placeholder { color: var(--fg-3); }
+.lg-input:focus { border-color: var(--accent-line); background: var(--bg-2); }
+.lg-text-btn {
+  align-self: center; margin-top: 2px;
+  font-size: 12.5px; color: var(--fg-3); font-family: var(--font-ui);
+  padding: 4px 8px; border-radius: 6px;
+}
+.lg-text-btn:hover { color: var(--fg-1); }
+
+/* error + switch links */
+.lg-error {
+  width: 100%; margin: 0 0 12px;
+  font-size: 12.5px; color: var(--dot-error); line-height: 1.45; text-wrap: pretty;
+}
+.lg-switch { margin-top: 22px; font-size: 13px; color: var(--fg-3); }
+.lg-switch button {
+  color: var(--fg-0); font-weight: 500; border-bottom: 1px solid transparent; padding-bottom: 1px;
+}
+.lg-switch button:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+/* loading splash */
+.lg-splash { flex: 1; display: grid; place-items: center; color: var(--fg-3); }
+.lg-splash .lg-mark { opacity: 0.6; animation: lg-pulse 1.4s ease-in-out infinite; }
+@keyframes lg-pulse { 0%,100% { opacity: 0.35; } 50% { opacity: 0.8; } }
+
+/* ============================================================
+   Settings — compact General + workspace rename.
+   ============================================================ */
+.set-wrap { padding: 28px 32px; max-width: 640px; }
+.set-h1 { font-size: 18px; font-weight: 600; color: var(--fg-0); margin: 0 0 4px; letter-spacing: -0.01em; }
+.set-sub { font-size: 13px; color: var(--fg-2); margin: 0 0 22px; }
+.set-card {
+  border: 1px solid var(--line-1); border-radius: var(--radius-lg);
+  background: var(--bg-1); overflow: hidden; margin-bottom: 16px;
+}
+.set-card-head { padding: 14px 16px 0; }
+.set-card-head h3 { font-size: 13.5px; font-weight: 600; color: var(--fg-0); margin: 0; }
+.set-card-head p { font-size: 12px; color: var(--fg-3); margin: 4px 0 0; }
+.set-card-body { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 14px; }
+.set-row { display: flex; align-items: center; gap: 16px; }
+.set-row-l { flex: 1; min-width: 0; }
+.set-row-label { font-size: 13px; color: var(--fg-1); font-weight: 500; }
+.set-row-hint { font-size: 11.5px; color: var(--fg-3); margin-top: 2px; }
+.set-input {
+  height: 36px; min-width: 220px; border-radius: var(--radius-md); padding: 0 12px;
+  background: var(--bg-0); border: 1px solid var(--line-1);
+  color: var(--fg-0); font-family: var(--font-ui); font-size: 13px; outline: none;
+}
+.set-input.mono { font-family: var(--font-mono); }
+.set-input:focus { border-color: var(--accent-line); }
+.set-mono { font-family: var(--font-mono); font-size: 12px; color: var(--fg-2); }
+.set-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.set-saved { font-size: 12px; color: var(--dot-online); }
+.set-err { font-size: 12px; color: var(--dot-error); }
+.set-user { font-size: 12.5px; color: var(--fg-2); }
