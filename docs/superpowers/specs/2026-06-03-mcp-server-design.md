@@ -37,7 +37,7 @@ Flip `JENZ_API` from `http://localhost:8787/api` (mock) to Jo's deployed URL —
 
 ## 4. The four tools
 
-Each tool = zod **raw-shape** `inputSchema` + `outputSchema` + a handler calling `api.ts`. Each returns **human-readable text** (`content`, Claude relays it) **and** validated **`structuredContent`**. Verdict/finding fields reuse the frozen `@jenz/shared` `AuditedSkill` / `Finding`.
+Each tool = zod **raw-shape** `inputSchema` + a handler calling `api.ts`. Each returns **human-readable text** (`content`, Claude relays it) **and** `structuredContent`. The three fixed-shape tools (`submit_skill`, `get_skill`, `list_managed_skills`) also declare a raw-shape **`outputSchema`** the SDK validates against. `pull_skill` returns two different shapes (discriminated on `ok`), which a v1.x ZodRawShape `outputSchema` can't express — so it declares **no `outputSchema`** and its gate guarantee is enforced in code + test (§5, §9). Verdict/finding fields reuse the frozen `@jenz/shared` `AuditedSkill` / `Finding`.
 
 | Tool | Input | API calls | Structured output |
 |---|---|---|---|
@@ -51,17 +51,16 @@ Each tool = zod **raw-shape** `inputSchema` + `outputSchema` + a handler calling
 ## 5. The gate (`pull_skill`) — the only real logic
 
 ```ts
-// outputSchema = discriminated union on `ok`. The ok:false variant has NO files field,
-// so the SDK's own output validation structurally guarantees files can never leak on a block.
-const PullOutput = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true),  name: z.string(),
-             files: z.array(z.object({ path: z.string(), content: z.string() })),
-             hint: z.string() }),
-  z.object({ ok: z.literal(false), risk: z.enum(['pending','suspicious','malicious']), reason: z.string() }), // any non-safe risk fails the gate
+// NOTE: SDK v1.x `outputSchema` must be a ZodRawShape (flat object), so a discriminated
+// union is NOT expressible there. pull_skill therefore declares NO outputSchema and returns
+// structuredContent freely. The gate guarantee lives in the code below + the TDD test — NOT
+// in schema validation. The two return shapes (discriminated on `ok`) are a TS type, used to
+// type the handler and keep the union honest in code:
+type PullResult =
+  | { ok: true;  name: string; files: { path: string; content: string }[]; hint: string }
+  | { ok: false; risk: 'pending' | 'suspicious' | 'malicious'; reason: string }; // any non-safe risk fails the gate
 
-]);
-
-async function pullSkill(id: string) {
+async function pullSkill(id: string): Promise<PullResult> {
   const { status, body } = await api.files(id);          // GET /skills/:id/files
   if (status !== 200) {
     return { ok: false as const, risk: body.risk, reason: body.reason };
@@ -71,7 +70,7 @@ async function pullSkill(id: string) {
 }
 ```
 
-**Rules:** files returned **only** on HTTP 200. On non-200 → `{ ok:false }` with **no `files` field, ever.** Never cache or synthesize files for a blocked skill. `pull_skill` on a non-safe skill is **not an error** — it's the gate working as designed.
+**Rules:** files returned **only** on HTTP 200. On non-200 → `{ ok:false }` with **no `files` field, ever** — enforced by the `pullSkill()` code and asserted by the RED/GREEN test (§9), since SDK v1.x can't enforce it via `outputSchema`. Never cache or synthesize files for a blocked skill. `pull_skill` on a non-safe skill is **not an error** — it's the gate working as designed.
 
 ## 6. API client (`src/api.ts`)
 
