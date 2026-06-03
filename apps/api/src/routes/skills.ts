@@ -49,6 +49,17 @@ async function resolveWorkspaceId(c: Context): Promise<string | null> {
 }
 
 /**
+ * Only SAFE skills get a topic folder. A quarantined (suspicious/malicious)
+ * skill belongs in Quarantine, not a category — and the auditor's category for
+ * a non-safe skill often just echoes the finding type (e.g. 'excessive-agency'),
+ * which spawns a junk folder. So we drop `category` unless the verdict is safe.
+ * (A dedicated folder-aware categorizer for safe skills is the follow-up.)
+ */
+function categoryFor(audited: { risk: Risk; category?: string }): { category: string } | Record<string, never> {
+  return audited.risk === 'safe' && audited.category !== undefined ? { category: audited.category } : {};
+}
+
+/**
  * GET / — browse/search the workspace skill library. Returns lightweight
  * summaries only (NO file contents — that's the gate's job). Optional filters:
  *   ?category=<exact>  ?risk=<pending|safe|suspicious|malicious>  ?query=<free text>
@@ -242,7 +253,7 @@ skills.post('/import/stream', async (c) => {
           data: {
             risk: audited.risk,
             ...(audited.description !== undefined ? { description: audited.description } : {}),
-            ...(audited.category !== undefined ? { category: audited.category } : {}),
+            ...categoryFor(audited),
             findings: {
               create: audited.findings.map((f) => ({
                 type: f.type,
@@ -263,7 +274,7 @@ skills.post('/import/stream', async (c) => {
           risk: audited.risk,
           findings: audited.findings,
           ...(audited.description !== undefined ? { description: audited.description } : {}),
-          ...(audited.category !== undefined ? { category: audited.category } : {}),
+          ...categoryFor(audited),
           taxonomy: taxonomyMapFor(audited.findings),
         });
       } catch {
@@ -316,7 +327,7 @@ async function persistAuditRespond(c: Context, raw: RawSkill, workspaceId: strin
     data: {
       risk: audited.risk,
       ...(audited.description !== undefined ? { description: audited.description } : {}),
-      ...(audited.category !== undefined ? { category: audited.category } : {}),
+      ...categoryFor(audited),
       findings: {
         create: audited.findings.map((f) => ({
           type: f.type,
@@ -338,7 +349,7 @@ async function persistAuditRespond(c: Context, raw: RawSkill, workspaceId: strin
       risk: audited.risk,
       findings: audited.findings,
       ...(audited.description !== undefined ? { description: audited.description } : {}),
-      ...(audited.category !== undefined ? { category: audited.category } : {}),
+      ...categoryFor(audited),
     },
     201,
   );

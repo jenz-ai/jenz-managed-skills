@@ -302,6 +302,34 @@ describe('POST /api/skills/import', () => {
     expect((await gate.json()).error).toBe('not_safe');
   });
 
+  it('does NOT assign a category/folder to a quarantined (malicious) skill', async () => {
+    const slug = `${PREFIX}noquarfolder`;
+    vi.mocked(fetchSkillFromGitHub).mockResolvedValue({
+      slug, name: 'Bad Skill', source: 'github', sourceRef: 'o/r',
+      files: [{ path: 'SKILL.md', content: '# bad\n' }],
+    });
+    // The auditor echoes the finding type as a category — must be dropped.
+    vi.mocked(auditSkill).mockResolvedValue({
+      slug, name: 'Bad Skill', risk: 'malicious', category: 'excessive-agency',
+      findings: [{ type: 'excessive-agency', severity: 'high', file: 'SKILL.md', line: 1, quote: 'x', detector: 'llm' }],
+    });
+
+    const res = await importReq({ ref: 'o/r' });
+    expect(res.status).toBe(201);
+    expect((await res.json()).category).toBeUndefined(); // quarantined → no folder
+    const persisted = await prisma.skill.findFirst({ where: { slug } });
+    expect(persisted!.category).toBeNull();
+  });
+
+  it('DOES assign the category/folder to a safe skill', async () => {
+    const slug = `${PREFIX}safefolder`;
+    vi.mocked(auditSkill).mockResolvedValue({ slug, name: slug, risk: 'safe', category: 'Formatting', findings: [] });
+
+    const res = await importReq({ source: { type: 'inline', name: slug, files: [{ path: 'SKILL.md', content: '# ok\n' }] } });
+    expect(res.status).toBe(201);
+    expect((await res.json()).category).toBe('Formatting');
+  });
+
   it('maps a GitHubError to its status', async () => {
     const { GitHubError } = await import('../lib/github');
     const err = new GitHubError('not found', 404);
