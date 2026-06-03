@@ -6,6 +6,7 @@ import type { AuditedSkill, Finding, RawSkill, Risk, Severity } from '@jenz/shar
 import { prisma } from '../db';
 import { auditSkill } from '../lib/audit';
 import { fetchSkillFromGitHub, GitHubError } from '../lib/github';
+import { taxonomyMapFor } from '../lib/taxonomy';
 
 /**
  * Skill routes — import a skill from GitHub, read its verdict, and the GATE.
@@ -218,12 +219,16 @@ skills.get('/:id', async (c) => {
   });
   if (!skill) return c.json({ error: 'not_found' }, 404);
 
+  const findings = skill.findings.map(toFinding);
   const body: AuditedSkill & { id: string } = {
     id: skill.id,
     slug: skill.slug,
     name: skill.name,
     risk: skill.risk,
-    findings: skill.findings.map(toFinding),
+    findings,
+    // Host-derived OWASP/MITRE crosswalk for the findings UI — mirrors POST /audit,
+    // computed at the response boundary (not persisted, never model-emitted).
+    taxonomy: taxonomyMapFor(findings),
     ...(skill.description !== null ? { description: skill.description } : {}),
     ...(skill.category !== null ? { category: skill.category } : {}),
   };

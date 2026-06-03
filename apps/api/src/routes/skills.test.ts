@@ -128,6 +128,21 @@ describe('GET /api/skills/:id', () => {
     expect(body.findings[0].detector).toBe('llm');
   });
 
+  it('includes a host-derived taxonomy crosswalk keyed by finding type', async () => {
+    const row = await seed({
+      slug: `${PREFIX}taxonomy`,
+      risk: 'malicious',
+      findings: [
+        { type: 'instruction-override', severity: 'high', file: 'SKILL.md', line: 1, quote: 'ignore previous', detector: 'regex' },
+      ],
+    });
+    const res = await app.request(`/api/skills/${row.id}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.taxonomy['instruction-override'].owaspLlm).toContain('LLM01');
+    expect(body.taxonomy['instruction-override'].mitreAtlas).toContain('AML.T0051');
+  });
+
   it('404 for an unknown id', async () => {
     const res = await app.request('/api/skills/nope');
     expect(res.status).toBe(404);
