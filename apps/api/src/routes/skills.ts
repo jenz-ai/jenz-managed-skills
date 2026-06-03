@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { Prisma } from '@prisma/client';
@@ -130,6 +131,7 @@ async function persistAuditRespond(c: Context, raw: RawSkill) {
         source: raw.source,
         ...(raw.sourceRef ? { sourceRef: raw.sourceRef } : {}),
         risk: 'pending',
+        contentHash: computeContentHash(raw.files),
         files: { create: raw.files.map((f) => ({ path: f.path, content: f.content })) },
       },
     });
@@ -169,6 +171,24 @@ async function persistAuditRespond(c: Context, raw: RawSkill) {
     201,
   );
 }
+
+/**
+ * sha256 over the file bytes in a canonical (path-sorted) form, so the hash is
+ * stable regardless of file ordering. This is what the gate re-verifies before
+ * releasing files — any byte change after the audit flips the hash and the gate
+ * fails closed. Any future code that mutates a skill's files MUST recompute this.
+ */
+function computeContentHash(files: { path: string; content: string }[]): string {
+  // JSON-encoded [path, content] pairs in path order: deterministic and
+  // unambiguous (no separator collision between path and content boundaries).
+  const canonical = JSON.stringify(
+    [...files]
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+      .map((f) => [f.path, f.content]),
+  );
+  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
 
 /** Validate an inline `files` value → SkillFile[] (non-empty, each {path,content} strings) or null. */
 function parseInlineFiles(value: unknown): RawSkill['files'] | null {
@@ -219,6 +239,16 @@ skills.get('/:id/files', async (c) => {
 
   if (skill.risk !== 'safe') {
     return c.json({ error: 'not_safe', risk: skill.risk, reason: gateReason(skill.risk, skill.findings) }, 403);
+  }
+
+  // Integrity re-verification (TOCTOU defense): re-hash the bytes we're about to
+  // release and refuse if they no longer match what was audited. A mismatch means
+  // the files were changed after the `safe` verdict — fail closed, demand re-audit.
+  if (skill.contentHash !== null && computeContentHash(skill.files) !== skill.contentHash) {
+    return c.json(
+      { error: 'not_safe', risk: 'pending', reason: 'integrity check failed — files changed since audit' },
+      403,
+    );
   }
 
   return c.json({ files: skill.files.map((f) => ({ path: f.path, content: f.content })) }, 200);

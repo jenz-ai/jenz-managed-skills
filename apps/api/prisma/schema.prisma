@@ -50,6 +50,10 @@ model Skill {
   risk        Risk        @default(pending)
   description String?
   category    String?
+  /// sha256 of the audited file bytes (canonical, path-sorted). The gate
+  /// re-verifies this before releasing files — a mismatch means the bytes
+  /// changed since the audit, so it fails closed. Nullable for pre-hash rows.
+  contentHash String?
   files       SkillFile[]
   findings    Finding[]
   createdAt   DateTime    @default(now())

