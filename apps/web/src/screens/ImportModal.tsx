@@ -21,7 +21,6 @@ import {
   buildInlineSources,
   parseRepoLabel,
   scanSkillDirs,
-  totalSkills,
   type ImportSource,
   type StagedGroup,
 } from "./onboardingLogic";
@@ -39,15 +38,6 @@ interface ImportModalProps {
 interface ModalGroup extends StagedGroup {
   sources: ImportSource[];
 }
-
-// Synthetic display names for sources we can't introspect in the browser (a
-// GitHub repo, or a folder with no SKILL.md). Display only — the real audit
-// runs off the ImportSource, not these names. Seeded off the source label so
-// the same source mints stable names within a session.
-const SKILL_POOL = [
-  "release-notes", "lead-scorer", "persona-map", "tone-check", "slack-digest",
-  "invoice-ocr", "changelog-watcher", "standup-digest", "pr-review", "trend-scan",
-];
 
 function ImportModal({ open, onClose, onAudit }: ImportModalProps) {
   const [groups, setGroups] = useState<ModalGroup[]>([]);
@@ -75,17 +65,7 @@ function ImportModal({ open, onClose, onAudit }: ImportModalProps) {
 
   if (!open) return null;
 
-  const total = totalSkills(groups);
   const sources = groups.flatMap((g) => g.sources);
-
-  const mint = (seed: string, n: number) => {
-    const start =
-      Math.abs([...String(seed)].reduce((a, c) => a + c.charCodeAt(0), 0)) % SKILL_POOL.length;
-    return Array.from({ length: n }, (_, i) => ({
-      id: "im-" + gidRef.current++ + "-" + i,
-      name: SKILL_POOL[(start + i) % SKILL_POOL.length],
-    }));
-  };
 
   const addGroup = (g: Omit<ModalGroup, "id">) =>
     setGroups((prev) => [...prev, { id: "img-" + gidRef.current++, ...g }]);
@@ -122,12 +102,14 @@ function ImportModal({ open, onClose, onAudit }: ImportModalProps) {
       const skills = skillDirNames.map((n) => ({ id: "im-" + gidRef.current++ + "-" + n, name: n }));
       addGroup({ kind: "upload", label: root, sub: root + "/", skills, sources: buildInlineSources(fileEntries) });
     } else if (fileEntries.length > 0) {
-      // No SKILL.md — submit the readable files as a single inline source.
+      // No SKILL.md dir — submit the readable files as one inline source. We
+      // can't know the skill names client-side, so stage it as a source with no
+      // fabricated names; the real skills surface when the audit runs.
       addGroup({
         kind: "upload",
         label: root,
-        sub: root + "/",
-        skills: mint(root, Math.min(Math.max(files.length, 1), 4)),
+        sub: "folder · audited on import",
+        skills: [],
         sources: [{ kind: "inline", name: root, files: fileEntries }],
       });
     }
@@ -141,12 +123,13 @@ function ImportModal({ open, onClose, onAudit }: ImportModalProps) {
       setRepoUrl("");
       return;
     }
-    const n = (Math.abs([...label].reduce((a, c) => a + c.charCodeAt(0), 0)) % 4) + 1;
+    // Can't enumerate a repo's skills in the browser — stage it as a source
+    // (no fabricated names); real skills appear as the audit streams them.
     addGroup({
       kind: "github",
       label,
-      sub: "github repo",
-      skills: mint(label, n),
+      sub: "github repo · audited on import",
+      skills: [],
       sources: [{ kind: "github", url, label }],
     });
     setRepoUrl("");
@@ -215,7 +198,7 @@ function ImportModal({ open, onClose, onAudit }: ImportModalProps) {
                     </span>
                     <span className="ob-grp-label">{g.label}</span>
                     <span className="ob-grp-sub">{g.sub}</span>
-                    <span className="ob-grp-count">{g.skills.length}</span>
+                    {g.skills.length > 0 && <span className="ob-grp-count">{g.skills.length}</span>}
                     <button className="ob-grp-x" title="Remove source" onClick={() => removeGroup(g.id)}>
                       <SIcon name="x" size={13} />
                     </button>
@@ -230,7 +213,7 @@ function ImportModal({ open, onClose, onAudit }: ImportModalProps) {
           <button className="jim-cancel" onClick={onClose}>Cancel</button>
           <button className="jim-go" onClick={runAudit} disabled={sources.length === 0}>
             <SIcon name="scan" size={14} />
-            {total > 0 ? `Audit ${total} skill${total > 1 ? "s" : ""}` : "Audit"}
+            {sources.length > 0 ? `Audit ${sources.length} source${sources.length > 1 ? "s" : ""}` : "Audit"}
           </button>
         </div>
       </div>

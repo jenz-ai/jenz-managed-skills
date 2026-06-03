@@ -37,13 +37,6 @@ const TOOLS = [
   { id: "hermes", name: "Hermes", path: "~/.hermes/skills" },
 ];
 
-const SKILL_POOL = [
-  "narrative-arc", "competitor-diff", "weekly-memo", "trend-scan", "cold-open",
-  "follow-up", "headline-3up", "pr-review", "standup-digest", "changelog-watcher",
-  "invoice-ocr", "slack-digest", "lead-scorer", "release-notes", "persona-map",
-  "tone-check",
-];
-
 // Stepper labels, in step order — Welcome · Workspace · Skills · Agent · Review.
 const STEP_LABELS: Record<StepId, string> = {
   welcome: "Welcome",
@@ -124,17 +117,6 @@ function Onboarding({ onComplete }: OnboardingProps) {
   const next = () => setStepIdx((i) => Math.min(i + 1, steps.length - 1));
   const back = () => setStepIdx((i) => Math.max(i - 1, 0));
 
-  // Deterministic skill-name generator — a synthetic pool indexed off a seed.
-  const mint = (seed: string, n: number) => {
-    const start =
-      Math.abs([...String(seed)].reduce((a, c) => a + c.charCodeAt(0), 0)) % SKILL_POOL.length;
-    const out = [];
-    for (let i = 0; i < n; i++) {
-      out.push({ id: "sk-" + gidRef.current++ + "-" + i, name: SKILL_POOL[(start + i) % SKILL_POOL.length] });
-    }
-    return out;
-  };
-
   const addGroup = (g: Omit<StagedGroup, "id">) =>
     setGroups((prev) => [...prev, { id: "grp-" + gidRef.current++, ...g }]);
   const removeGroup = (id: string) =>
@@ -143,10 +125,16 @@ function Onboarding({ onComplete }: OnboardingProps) {
     setGroups((prev) =>
       prev
         .map((g) => (g.id === gid ? { ...g, skills: g.skills.filter((s) => s.id !== sid) } : g))
-        .filter((g) => g.skills.length > 0),
+        // Drop only the edited group if its last skill was removed — keep
+        // source-only groups (github/mcp) that legitimately carry no skill names.
+        .filter((g) => g.id !== gid || g.skills.length > 0),
     );
 
+  // `total` counts only the skills we actually know (SKILL.md folders); GitHub
+  // repos / MCP contribute 0 until audited. `sourceCount` is what drives the
+  // "anything staged?" copy, since a source can hold an unknown number of skills.
   const total = totalSkills(groups);
+  const sourceCount = groups.length;
 
   const openFolder = (label: string | null, sub: string) => {
     pendingRef.current = { label, sub };
@@ -189,15 +177,12 @@ function Onboarding({ onComplete }: OnboardingProps) {
 
       const skills = skillDirNames.map((n) => ({ id: "sk-" + gidRef.current++ + "-" + n, name: n }));
       addGroup({ kind: "upload", label: meta.label || root, sub: meta.sub || root + "/", skills });
-    } else {
-      // No SKILL.md found — mint synthetic names for display (legacy behaviour)
-      const skills = mint(root, Math.min(Math.max(files.length, 1), 4));
-      addGroup({ kind: "upload", label: meta.label || root, sub: meta.sub || root + "/", skills });
-      // For non-SKILL.md folders, use all readable files as a single inline source
-      if (fileEntries.length > 0) {
-        const source: ImportSource = { kind: "inline", name: root, files: fileEntries };
-        setImportSources((prev) => [...prev, source]);
-      }
+    } else if (fileEntries.length > 0) {
+      // No SKILL.md dir — submit the readable files as one inline source. We
+      // can't know the skill names client-side, so stage it as a source (no
+      // fabricated names); the real skills surface when the audit runs.
+      setImportSources((prev) => [...prev, { kind: "inline", name: root, files: fileEntries }]);
+      addGroup({ kind: "upload", label: meta.label || root, sub: "folder · audited on import", skills: [] });
     }
   };
 
@@ -209,16 +194,13 @@ function Onboarding({ onComplete }: OnboardingProps) {
       setRepoUrl("");
       return;
     }
-    // Add a github ImportSource
+    // Add a github ImportSource. We can't enumerate the repo's skills in the
+    // browser, so it stages as a source (no fabricated skill names) — the real
+    // skills appear as the audit streams them in.
     const newSource: ImportSource = { kind: "github", url, label };
     setImportSources((prev) => [...prev, newSource]);
 
-    addGroup({
-      kind: "github",
-      label,
-      sub: "github repo",
-      skills: mint(label, (Math.abs([...label].reduce((a, c) => a + c.charCodeAt(0), 0)) % 4) + 1),
-    });
+    addGroup({ kind: "github", label, sub: "github repo · audited on import", skills: [] });
     setRepoUrl("");
   };
 
@@ -226,9 +208,10 @@ function Onboarding({ onComplete }: OnboardingProps) {
     setMcp({ connected: true, agent });
     const label = (TOOLS.find((t) => t.id === agent) || {}).name || agent;
     if (!groups.some((g) => g.kind === "mcp" && g.agent === agent)) {
-      addGroup({ kind: "mcp", agent, label, sub: "pushed via MCP", skills: mint("mcp" + agent, 4) });
+      // MCP skills are pushed at runtime via the MCP server, not collected here —
+      // so this stages as a connected-agent source with no skill names.
+      addGroup({ kind: "mcp", agent, label, sub: "pushed via MCP", skills: [] });
     }
-    // MCP skills are pushed at runtime via the MCP server, not collected as ImportSources here.
   };
 
   // Which staged groups are expanded to reveal their skill names.
@@ -246,49 +229,56 @@ function Onboarding({ onComplete }: OnboardingProps) {
     if (!groups.length) return null;
     return (
       <div className="ob-staged">
-        {groups.map((g) => (
-          <div className="ob-grp" key={g.id}>
-            <div
-              className="ob-grp-head"
-              style={{ cursor: "pointer" }}
-              onClick={() => toggleExpand(g.id)}
-              title={expanded.has(g.id) ? "Hide skills" : "Show skills"}
-            >
-              <span className="ob-grp-ico">
-                <SIcon name={g.kind === "github" ? "git" : g.kind === "mcp" ? "terminal" : "folder"} size={14} />
-              </span>
-              <span className="ob-grp-label">{g.label}</span>
-              <span className="ob-grp-sub">{g.sub}</span>
-              <span className="ob-grp-count">{g.skills.length}</span>
-              {!removableSkills && (
-                <span
-                  aria-hidden="true"
-                  style={{
-                    display: "inline-flex",
-                    transition: "transform .15s ease",
-                    transform: expanded.has(g.id) ? "rotate(180deg)" : "none",
-                    color: "var(--fg-3)",
-                  }}
-                >
-                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M3 4.5 L6 7.5 L9 4.5" /></svg>
+        {groups.map((g) => {
+          // Real skill names are only known for uploaded folders that contained
+          // SKILL.md dirs. GitHub repos / MCP / no-SKILL.md folders stage as a
+          // source — no fabricated names, no count, no expander.
+          const hasSkills = g.skills.length > 0;
+          const canExpand = hasSkills && !removableSkills;
+          return (
+            <div className="ob-grp" key={g.id}>
+              <div
+                className="ob-grp-head"
+                style={canExpand ? { cursor: "pointer" } : undefined}
+                onClick={canExpand ? () => toggleExpand(g.id) : undefined}
+                title={canExpand ? (expanded.has(g.id) ? "Hide skills" : "Show skills") : undefined}
+              >
+                <span className="ob-grp-ico">
+                  <SIcon name={g.kind === "github" ? "git" : g.kind === "mcp" ? "terminal" : "folder"} size={14} />
                 </span>
-              )}
-              <button className="ob-grp-x" title="Remove source" onClick={(e) => { e.stopPropagation(); removeGroup(g.id); }}><SIcon name="x" size={13} /></button>
-            </div>
-            {(removableSkills || expanded.has(g.id)) && (
-              <div className="ob-grp-skills">
-                {g.skills.map((s) => (
-                  <span className="ob-skchip" key={s.id}>
-                    <SIcon name="skills" size={11} /> {s.name}
-                    {removableSkills && (
-                      <button className="ob-skchip-x" title="Remove" onClick={() => removeSkill(g.id, s.id)}><SIcon name="x" size={11} /></button>
-                    )}
+                <span className="ob-grp-label">{g.label}</span>
+                <span className="ob-grp-sub">{g.sub}</span>
+                {hasSkills && <span className="ob-grp-count">{g.skills.length}</span>}
+                {canExpand && (
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: "inline-flex",
+                      transition: "transform .15s ease",
+                      transform: expanded.has(g.id) ? "rotate(180deg)" : "none",
+                      color: "var(--fg-3)",
+                    }}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M3 4.5 L6 7.5 L9 4.5" /></svg>
                   </span>
-                ))}
+                )}
+                <button className="ob-grp-x" title="Remove source" onClick={(e) => { e.stopPropagation(); removeGroup(g.id); }}><SIcon name="x" size={13} /></button>
               </div>
-            )}
-          </div>
-        ))}
+              {hasSkills && (removableSkills || expanded.has(g.id)) && (
+                <div className="ob-grp-skills">
+                  {g.skills.map((s) => (
+                    <span className="ob-skchip" key={s.id}>
+                      <SIcon name="skills" size={11} /> {s.name}
+                      {removableSkills && (
+                        <button className="ob-skchip-x" title="Remove" onClick={() => removeSkill(g.id, s.id)}><SIcon name="x" size={11} /></button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -404,7 +394,7 @@ function Onboarding({ onComplete }: OnboardingProps) {
         <div className="ob-foot">
           <button className="btn-secondary" onClick={back}>← Back</button>
           <span className="ob-foot-spacer" />
-          <span className="ob-foot-hint">{total > 0 ? `${total} skill${total > 1 ? "s" : ""} staged` : "or connect with MCP"}</span>
+          <span className="ob-foot-hint">{sourceCount > 0 ? `${sourceCount} source${sourceCount > 1 ? "s" : ""} staged` : "or connect with MCP"}</span>
           <button className="btn-primary" onClick={next}>Continue →</button>
         </div>
       </Shell>
@@ -440,21 +430,25 @@ function Onboarding({ onComplete }: OnboardingProps) {
   return (
     <Shell {...nav}>
       <div className="ob-eyebrow">Step 4 · Review</div>
-      <h1 className="ob-title">{total > 0 ? "Review your skills." : "Nothing staged yet."}</h1>
+      <h1 className="ob-title">{sourceCount > 0 ? "Review your sources." : "Nothing staged yet."}</h1>
       <p className="ob-blurb">
-        {total > 0 ? (
-          <>These are the skills headed into <b>{name || "your workspace"}</b>. Drop anything you don't want, then enter your workspace.</>
+        {sourceCount > 0 ? (
+          <>These are the sources headed into <b>{name || "your workspace"}</b> — every skill is audited on import. Drop anything you don't want, then enter your workspace.</>
         ) : (
           <>You can finish now and add skills later — uploads or a connected agent pushing them through Jenz.</>
         )}
       </p>
 
-      {total > 0 ? (
+      {sourceCount > 0 ? (
         <>
           <div className="ob-review-bar">
-            <span><b>{total}</b> skill{total > 1 ? "s" : ""}</span>
-            <span className="ob-review-sep">·</span>
-            <span>{groups.length} source{groups.length > 1 ? "s" : ""}</span>
+            <span><b>{sourceCount}</b> source{sourceCount > 1 ? "s" : ""}</span>
+            {total > 0 && (
+              <>
+                <span className="ob-review-sep">·</span>
+                <span><b>{total}</b> skill{total > 1 ? "s" : ""}</span>
+              </>
+            )}
             {mcp.connected && (
               <>
                 <span className="ob-review-sep">·</span>
