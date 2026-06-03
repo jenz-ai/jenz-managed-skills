@@ -8,7 +8,7 @@ import { SIcon } from "./components/SIcon";
 import { Sidebar } from "./shell/Sidebar";
 import { Breadcrumb } from "./shell/Breadcrumb";
 import { TARGET_BY_ID } from "./data/targets";
-import { CATEGORIES, SKILLS, SOURCE_LABEL } from "./data/skills";
+import { SOURCE_LABEL } from "./data/skills";
 import type { MdLine, Screen, Skill, View } from "./state/types";
 import { ScreenSlot } from "./shell/ScreenSlot";
 import { listSkills } from "./lib/api";
@@ -33,7 +33,7 @@ export default function App() {
   const [skillId, setSkillId] = useState<string | null>(null);
   const [runKey, setRunKey] = useState(0);
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [categories, setCategories] = useState<string[]>(() => CATEGORIES.slice());
+  const [categories, setCategories] = useState<string[]>([]);
   const [installs, setInstalls] = useState<Record<string, string[]>>({});
   const [toast, setToast] = useState<Toast | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -46,9 +46,10 @@ export default function App() {
     document.body.classList.toggle("light", theme === "light");
   }, [theme]);
 
-  // Load the live skill library (GET /skills) on mount. Falls back to the
-  // bundled fixtures so the demo never shows a blank workspace if the API is
-  // unreachable — a fail-soft for the UI only (the gate stays server-side).
+  // Load the live skill library (GET /skills) on mount. On failure we show an
+  // HONEST empty/error state — never bundled fixtures. This is a security tool:
+  // silently substituting fake skills for a failed audit fetch would be worse
+  // than showing nothing. (The gate/verdict logic is server-side regardless.)
   useEffect(() => {
     let alive = true;
     listSkills()
@@ -58,10 +59,12 @@ export default function App() {
         setSkills(live);
         setCategories(catsOf(live));
       })
-      .catch(() => {
+      .catch((e) => {
         if (!alive) return;
-        setSkills(SKILLS.map((s) => ({ ...s })));
-        setCategories(CATEGORIES.slice());
+        console.warn("[jenz] failed to load skills from the audit API", e);
+        setSkills([]);
+        setCategories([]);
+        notify(<>Couldn't reach the audit service — no skills loaded.</>);
       });
     return () => {
       alive = false;
