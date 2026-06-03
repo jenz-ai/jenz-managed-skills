@@ -52,9 +52,18 @@ export function parseRepoLabel(url: string): string {
     .replace(/\.git$/, "")
     .split("/")
     .filter(Boolean);
-  return parts.length >= 2
-    ? parts[0] + "/" + parts[1]
-    : url.replace(/^https?:\/\//, "");
+  if (parts.length < 2) return url.replace(/^https?:\/\//, "");
+
+  const base = parts[0] + "/" + parts[1];
+  // Segments after org/repo describe a subdir. Drop a leading tree/<branch> or
+  // blob/<branch> (the GitHub web-UI prefix) and, if a real subdir path remains,
+  // append its leaf so two subdirs of the SAME repo get DISTINCT labels — the
+  // staging dedup keys off the label, so without this the second subdir is
+  // silently dropped (the two-subdir demo import bug).
+  let rest = parts.slice(2);
+  if (rest[0] === "tree" || rest[0] === "blob") rest = rest.slice(2);
+  const leaf = rest[rest.length - 1];
+  return leaf ? base + "/" + leaf : base;
 }
 
 // Scan an uploaded folder's relative paths for SKILL.md files and derive the

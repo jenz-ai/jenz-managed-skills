@@ -41,11 +41,27 @@ describe("parseRepoLabel", () => {
   it("parses a bare github.com slug", () => {
     expect(parseRepoLabel("github.com/acme/agent-skills")).toBe("acme/agent-skills");
   });
-  it("ignores extra path segments beyond org/repo", () => {
+  it("treats a branch-only tree URL as the repo root (no subdir leaf)", () => {
     expect(parseRepoLabel("github.com/org/skills/tree/main")).toBe("org/skills");
   });
   it("falls back to the host-stripped string when under two segments", () => {
     expect(parseRepoLabel("https://example.com/only")).toBe("example.com/only");
+  });
+
+  // Subdir-aware labels: the demo imports two SUBDIRS of the same repo, which
+  // must NOT collapse to one label (the dedup keys off the label).
+  it("appends the subdir leaf for a tree subdir URL", () => {
+    expect(parseRepoLabel("https://github.com/jenz-ai/agent-skills/tree/main/skills/changelog-genie"))
+      .toBe("jenz-ai/agent-skills/changelog-genie");
+  });
+  it("appends the subdir leaf for a blob subdir URL", () => {
+    expect(parseRepoLabel("github.com/jenz-ai/agent-skills/blob/main/skills/deploy-preview"))
+      .toBe("jenz-ai/agent-skills/deploy-preview");
+  });
+  it("gives two subdirs of the same repo DISTINCT labels (no false dedup)", () => {
+    const a = parseRepoLabel("github.com/jenz-ai/agent-skills/tree/main/skills/changelog-genie");
+    const b = parseRepoLabel("github.com/jenz-ai/agent-skills/tree/main/skills/deploy-preview");
+    expect(a).not.toBe(b);
   });
 });
 
