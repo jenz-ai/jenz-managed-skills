@@ -245,3 +245,91 @@ describe('runAuditPass', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+/** A non-OK fetch response with a status code (json() unused on the error path). */
+function errResponse(status: number) {
+  return { ok: false, status, json: async () => ({}) };
+}
+
+describe('runAuditPass — transport resilience', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    process.env.OPENROUTER_API_KEY = 'test-key';
+    process.env.AUDIT_MODEL = 'deepseek/deepseek-chat';
+    delete process.env.OPENROUTER_BASE_URL;
+    delete process.env.AUDIT_TEMPERATURE;
+  });
+
+  // Regression guard for the prod outage: AUDIT_MODEL was unset in Railway, so
+  // every pass threw → fail-closed → benign skills flagged suspicious. A missing
+  // env var must fall back to the default model, never disable the model layer.
+  it('uses the default model when AUDIT_MODEL is unset (never throws on missing env)', async () => {
+    delete process.env.AUDIT_MODEL;
+    const fetchMock = vi.fn(async () => okResponse(JSON.stringify({ risk: 'safe', findings: [] })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAuditPass(sampleSkill);
+
+    expect(result.risk).toBe('safe');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.model).toBe('deepseek/deepseek-chat');
+  });
+
+  it('retries a transient 503 then succeeds (bounded backoff)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errResponse(503))
+      .mockResolvedValueOnce(okResponse(JSON.stringify({ risk: 'safe', findings: [] })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAuditPass(sampleSkill);
+
+    expect(result.risk).toBe('safe');
+    expect(fetchMock).toHaveBeenCalledTimes(2); // transient retry, one parse
+  });
+
+  it('retries a transient 429 (rate limit) then succeeds', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errResponse(429))
+      .mockResolvedValueOnce(okResponse(JSON.stringify({ risk: 'suspicious', findings: [] })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAuditPass(sampleSkill);
+
+    expect(result.risk).toBe('suspicious');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a network error then succeeds', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('socket hang up'))
+      .mockResolvedValueOnce(okResponse(JSON.stringify({ risk: 'safe', findings: [] })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAuditPass(sampleSkill);
+
+    expect(result.risk).toBe('safe');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT retry a non-transient 401 — throws immediately', async () => {
+    const fetchMock = vi.fn(async () => errResponse(401));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runAuditPass(sampleSkill)).rejects.toThrow(/401/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up after exhausting retries on persistent 503', async () => {
+    const fetchMock = vi.fn(async () => errResponse(503));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(runAuditPass(sampleSkill)).rejects.toThrow(/503/);
+    // initial attempt + RETRY_BACKOFF_MS.length (2) retries = 3 calls
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});

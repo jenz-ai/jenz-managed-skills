@@ -32,6 +32,22 @@ export interface ModelAudit {
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 const DEFAULT_TEMPERATURE = 0.4;
 
+/**
+ * Sensible default audit model. The model is env-driven (`AUDIT_MODEL`) and stays
+ * provider-agnostic — but a MISSING env var must never silently disable the whole
+ * model layer. (That exact misconfig in prod made every pass throw → fail-closed →
+ * benign skills flagged `suspicious`.) The default matches the team-decided model
+ * in `.env.example`; setting `AUDIT_MODEL` overrides it.
+ */
+const DEFAULT_AUDIT_MODEL = 'deepseek/deepseek-chat';
+
+/** Transient HTTP statuses worth a bounded retry (rate-limit / gateway / overload). */
+const TRANSIENT_STATUS: ReadonlySet<number> = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+/** Backoff schedule between transient retries; total added latency <1s stays well
+ *  under the orchestrator's per-pass abort timeout. Length = number of retries. */
+const RETRY_BACKOFF_MS: readonly number[] = [250, 600];
+
 const VALID_SEVERITIES: ReadonlySet<string> = new Set<Severity>([
   'critical',
   'high',
@@ -561,7 +577,37 @@ function mapFindings(rawFindings: unknown, lineMap: LineRef[], fallbackFile: str
   return out;
 }
 
-/** POST one chat-completion request to OpenRouter; returns the raw model content string. */
+/** True for an abort/timeout error — never retry these (the orchestrator aborted). */
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
+}
+
+/** Abort-aware delay: rejects immediately if the signal is (or becomes) aborted. */
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('aborted'));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(new Error('aborted'));
+      },
+      { once: true },
+    );
+  });
+}
+
+/**
+ * POST one chat-completion request to OpenRouter; returns the raw model content
+ * string. Retries a bounded number of times on TRANSIENT failures (network error
+ * or 408/425/429/5xx) with short backoff, so a single provider blip doesn't fail
+ * the pass — a failed pass fails-closed the whole audit. Aborts (orchestrator
+ * timeout) and non-transient statuses (e.g. 400/401/403) throw immediately.
+ */
 async function requestCompletion(
   messages: ChatMessage[],
   temperature: number,
@@ -571,36 +617,59 @@ async function requestCompletion(
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is not configured');
 
-  const model = process.env.AUDIT_MODEL;
-  if (!model) throw new Error('AUDIT_MODEL is not configured');
-
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      response_format: { type: 'json_object' },
-      reasoning: { enabled: false },
-      temperature,
-    }),
-    signal,
+  const model = process.env.AUDIT_MODEL || DEFAULT_AUDIT_MODEL;
+  const body = JSON.stringify({
+    model,
+    messages,
+    response_format: { type: 'json_object' },
+    reasoning: { enabled: false },
+    temperature,
   });
 
-  if (!response.ok) {
-    throw new Error(`OpenRouter request failed with status ${response.status}`);
+  const maxAttempts = RETRY_BACKOFF_MS.length + 1;
+  let lastError: Error = new Error('OpenRouter request failed');
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (signal?.aborted) throw new Error('OpenRouter request aborted');
+
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body,
+        signal,
+      });
+    } catch (err) {
+      // Network-level failure: retry unless aborted or out of attempts.
+      if (isAbortError(err) || attempt === maxAttempts - 1) throw err;
+      lastError = err instanceof Error ? err : new Error(String(err));
+      await delay(RETRY_BACKOFF_MS[attempt], signal);
+      continue;
+    }
+
+    if (!response.ok) {
+      // Transient status → bounded backoff retry; everything else fails now.
+      if (TRANSIENT_STATUS.has(response.status) && attempt < maxAttempts - 1) {
+        lastError = new Error(`OpenRouter request failed with status ${response.status}`);
+        await delay(RETRY_BACKOFF_MS[attempt], signal);
+        continue;
+      }
+      throw new Error(`OpenRouter request failed with status ${response.status}`);
+    }
+
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
+    const content = data.choices?.[0]?.message?.content;
+    if (typeof content !== 'string') {
+      throw new Error('OpenRouter response missing message content');
+    }
+    return content;
   }
 
-  const data = (await response.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') {
-    throw new Error('OpenRouter response missing message content');
-  }
-
-  return content;
+  throw lastError;
 }
 
 /**

@@ -81,19 +81,41 @@ export OPENROUTER_API_KEY=… AUDIT_MODEL=deepseek/deepseek-chat \
 pnpm exec vitest run src/lib/audit.live.test.ts --reporter=verbose
 ```
 
-## ⚠️ Cross-lane finding for L1 (owns `audit.ts`) — demo risk
+## 🎯 ROOT CAUSE of the prod benign→suspicious over-flag (PROVEN) — FIXED
 
-The live malicious audit hit the **per-pass timeout** (one DeepSeek pass was slow,
-~45 s). The current orchestrator sets `passesHealthy = false` if *either* pass
-fails/times out, and `scoreRisk([], false) === 'suspicious'`. **So a benign skill
-whose model pass is merely slow gets flagged `suspicious`/0-findings** — that is
-exactly the prod hello-world over-flag, and its root cause is **model latency, not
-the prompt** (the prompt is verified correct above).
+Diagnosed by probing the real Railway prod env (`railway run`, no secrets printed):
 
-Options for L1 to weigh (their call — L2 will not touch `audit.ts`):
-- allow `safe` when prefilter found nothing **and ≥1 pass completed cleanly** (a
-  zero-evidence label-only shortfall shouldn't block), or
-- retry a timed-out pass once, or raise `AUDIT_TIMEOUT_MS`, or use a faster model.
+```
+hasOpenRouterKey: true   AUDIT_MODEL: <unset>   AUDIT_TIMEOUT_MS: <unset(25000)>
+```
+
+**`AUDIT_MODEL` was unset in the Railway prod env.** `openrouter.ts` did
+`const model = process.env.AUDIT_MODEL; if (!model) throw …`, so in prod **every
+model pass threw instantly** (verified: 1–16 ms, zero HTTP calls) → both passes
+fail → `passesHealthy=false` → `scoreRisk([], false) === 'suspicious'`. That is
+the exact hello-world over-flag — and it meant the **entire LLM layer was silently
+off in prod** (only the regex prefilter ran, so semantic-only attacks were missed).
+NOT the prompt (the prompt is verified correct above), NOT a logic bug.
+
+Proven end-to-end with the live test run **under the real prod env** (`railway run`):
+- before: benign → `suspicious` (model never ran)
+- after the fix (prod env, `AUDIT_MODEL` still unset there): benign → **`safe`**,
+  malicious → **`malicious`**, semantic-only → **`malicious`** with real LLM findings.
+
+**Fix (L2 lane, `openrouter.ts`, shipped):** a missing env var must never disable
+the model layer — `model = process.env.AUDIT_MODEL || 'deepseek/deepseek-chat'`
+(env still overrides, provider-agnostic) + bounded transient-retry on
+408/425/429/5xx/network errors (abort-aware) so a single provider blip can't
+fail-close a pass. So a redeploy of this code fixes prod even with the env var
+still unset.
+
+**Action — @jo:** redeploy (`railway up`) to pick up the fix; also set
+`AUDIT_MODEL=deepseek/deepseek-chat` in the Railway env (belt-and-suspenders).
+
+**Secondary, for L1 (owns `audit.ts`, not L2's to touch):** one pass still hit the
+25 s `AUDIT_TIMEOUT_MS` on a slow input. Worth hardening so a slow-but-fine pass
+can't flip a clean skill to `suspicious`: allow `safe` when prefilter found nothing
+**and ≥1 pass completed cleanly**, and/or raise `AUDIT_TIMEOUT_MS`.
 
 ## For L4-eval
 All 37 detections + 4 few-shots are listed in comms (`log/natnael.md`, the
