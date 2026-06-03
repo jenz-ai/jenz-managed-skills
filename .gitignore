@@ -1,0 +1,23 @@
+# deps
+node_modules/
+
+# build output
+dist/
+build/
+.output/
+
+# env
+.env
+.env.*
+!.env.example
+
+# packaged skills / model weights
+*.tar.gz
+weights/
+*.gguf
+*.safetensors
+
+# misc
+.DS_Store
+*.log
+.turbo/
