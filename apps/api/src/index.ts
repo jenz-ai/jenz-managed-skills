@@ -1,9 +1,11 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import auditRoutes from './routes/audit';
 
 const app = new Hono();
 
 app.get('/healthz', (c) => c.json({ ok: true }));
+app.route('/audit', auditRoutes);
 
 const port = Number(process.env.PORT) || 8080;
 
