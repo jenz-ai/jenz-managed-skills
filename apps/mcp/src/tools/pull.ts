@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 
 export type PullResult =
-  | { ok: true; name: string; files: { path: string; content: string }[]; hint: string }
+  | { ok: true; files: { path: string; content: string }[]; hint: string }
   | { ok: false; risk: 'pending' | 'suspicious' | 'malicious'; reason: string };
 
 const BLOCKED_RISKS = ['pending', 'suspicious', 'malicious'] as const;
@@ -21,14 +21,13 @@ export async function pullSkill(id: string): Promise<PullResult> {
       reason: body.reason ?? body.error ?? 'blocked',
     };
   }
-  // 200 contract: the backend gate guarantees `name` + `files` on a safe response.
-  // Fail closed if a malformed 200 is missing them rather than returning files:undefined.
-  if (!body.name || !body.files) {
-    throw new Error('malformed 200 from gate: missing name/files');
+  // 200 contract: the gate returns `{ files }` on a safe response (no top-level `name`).
+  // Fail closed if a malformed 200 is missing files rather than returning files:undefined.
+  if (!body.files) {
+    throw new Error('malformed 200 from gate: missing files');
   }
   return {
     ok: true,
-    name: body.name,
     files: body.files,
     hint: 'Write these to ~/.claude/skills/<name>/ then re-run skill discovery.',
   };

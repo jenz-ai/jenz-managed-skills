@@ -78,5 +78,5 @@ app.get('/api/skills/:id/files', (c) => {
   if (verdict.risk !== 'safe') {
     return c.json({ error: 'not_safe', risk: verdict.risk, reason: `blocked: risk=${verdict.risk}` }, 403);
   }
-  return c.json({ name: rec.raw.name, files: rec.raw.files });
+  return c.json({ files: rec.raw.files }); // matches live: { files } only, no top-level name
 });
