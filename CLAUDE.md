@@ -65,8 +65,8 @@ Open-weight **security gate** that audits AI-agent *skills* (markdown + scripts 
 - `pnpm typecheck` before pushing; `git pull` before you push (lanes are disjoint, so this stays conflict-free).
 - Keep the model wrapper **provider-agnostic** — model + base URL come from env so we can switch at kickoff with no code change.
 
-## Model Decision (open until ~H1)
-The wrapper is env-driven. Default target: **`gpt-oss-120b` on Groq** (published injection-hijacking evals, strict `json_schema`, Apache-2.0, fast/cheap). Fallback: **DeepSeek on OpenRouter**. Local dev option: `qwen2.5:14b-q4_K_M` via Ollama. Flip via `AUDIT_MODEL` + provider env — no code edit.
+## Model (DECIDED: OpenRouter)
+Audit verdict engine = **DeepSeek (V4) ×2 via OpenRouter** — double-pass self-consistency, **non-thinking** (`reasoning:{enabled:false}`), forced JSON (schema-in-prompt + `response_format:{type:'json_object'}` + retry-on-invalid). Wrapper (`apps/api/src/lib/openrouter.ts`) is env-driven: `OPENROUTER_API_KEY`, `AUDIT_MODEL`, `OPENROUTER_BASE_URL` in `apps/api/.env`. Provider-agnostic — repoint base URL at local Ollama for the sovereignty path with no code change. Model output is **advisory only**; `scoreRisk()` computes the trusted verdict.
 
 ## Team Comms (use it — this is our ONLY channel)
 **All cross-teammate communication happens through the comms repo `~/jenz-team-comms`.** There is no Slack/Discord side-channel — if it isn't in comms, the others haven't seen it. So **check it proactively and often**, not just when you remember to:
