@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { SIcon } from "./components/SIcon";
+import { JenzMark } from "./auth/JenzMark";
 import { Sidebar } from "./shell/Sidebar";
 import { Breadcrumb } from "./shell/Breadcrumb";
 import { TARGET_BY_ID } from "./data/targets";
@@ -232,7 +233,7 @@ export default function App() {
     <div className="js-win">
       <div className="js-titlebar">
         <div className="js-title">
-          <span className="js-logo"><SIcon name="shield-check" size={12} /></span>
+          <span className="js-logo"><JenzMark size={18} /></span>
           jenz managed skills <span className="js-title-sub">· {workspace?.name ?? "Workspace"}</span>
         </div>
         <div className="js-titlebar-end"><SIcon name="shield-check" size={13} /> auditor online</div>

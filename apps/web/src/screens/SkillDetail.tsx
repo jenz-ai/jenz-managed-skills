@@ -16,7 +16,7 @@ import { TARGET_BY_ID } from "../data/targets";
 import { SOURCE_LABEL } from "../data/skills";
 import { getSkill, getSkillFiles, GateError } from "../lib/api";
 import { mapFinding } from "../lib/adapt";
-import type { MdLine, Risk, Skill } from "../state/types";
+import type { Finding, MdLine, Risk, Skill } from "../state/types";
 
 // ---- pure: files-rail derivation (testable) ----
 export interface RailFile {
@@ -45,6 +45,34 @@ export function deriveFiles(sk: Skill): RailFile[] {
 /** Formats the gate blocked message shown when files are withheld. */
 export function gateBlockedMessage(risk: string, reason: string): string {
   return `Files withheld — ${reason} (risk: ${risk})`;
+}
+
+// ---- pure: threat summary from the structured findings (testable) ----
+export interface ThreatSummary {
+  count: number; // total findings
+  fileCount: number; // distinct files touched
+  types: { type: string; n: number }[]; // distinct types, first-seen order, with counts
+}
+
+/**
+ * Summarizes a findings array for the flagged-skill description card.
+ * Reads the REAL structured findings (never the server's synthetic string).
+ * Distinct types keep first-seen order; repeats are counted in `n`.
+ */
+export function summarizeThreat(findings: Finding[]): ThreatSummary {
+  const files = new Set<string>();
+  const order: string[] = [];
+  const counts = new Map<string, number>();
+  for (const f of findings) {
+    files.add(f.file);
+    if (!counts.has(f.type)) order.push(f.type);
+    counts.set(f.type, (counts.get(f.type) ?? 0) + 1);
+  }
+  return {
+    count: findings.length,
+    fileCount: files.size,
+    types: order.map((type) => ({ type, n: counts.get(type) ?? 0 })),
+  };
 }
 
 // ---- pure: SKILL.md line array → flowing markdown blocks (testable) ----
@@ -381,6 +409,11 @@ function SkillDetail({
   // Use live findings if available, fall back to prop findings
   const displayFindings = liveFindings ?? sk.findings;
 
+  // Flagged skills get a structured threat summary in place of the raw desc
+  // (the server synthesizes desc as e.g. "8 finding(s): …" — we never parse it).
+  const isThreatSummary = flagged && displayFindings.length > 0;
+  const threat = useMemo(() => summarizeThreat(displayFindings), [displayFindings]);
+
   // file list — SKILL.md plus any files referenced by findings
   const files = useMemo(
     () => deriveFiles({ ...sk, findings: displayFindings }),
@@ -545,13 +578,37 @@ function SkillDetail({
             </div>
           )}
 
-          {/* Description — in a card */}
-          <div className="skill-field">
-            <label className="skill-field-label">
-              <SIcon name="more" size={11} /> Description
-            </label>
-            <div className="skill-field-box">{sk.desc}</div>
-          </div>
+          {/* Description — a structured threat summary when flagged, else the
+              real description text. We render the summary from the live
+              findings, never from the server's synthetic desc string. */}
+          {isThreatSummary ? (
+            <div className="skill-field">
+              <label className="skill-field-label">
+                <SIcon name="shield-alert" size={11} /> Threat summary
+              </label>
+              <div className={"skill-threat " + sk.risk}>
+                <div className="skill-threat-head">
+                  {threat.count} finding{threat.count > 1 ? "s" : ""} across {threat.fileCount} file
+                  {threat.fileCount > 1 ? "s" : ""}
+                </div>
+                <div className="skill-threat-chips">
+                  {threat.types.map((t) => (
+                    <span key={t.type} className={"skill-threat-chip " + sk.risk}>
+                      {t.type}
+                      {t.n > 1 && <span className="stc-n">×{t.n}</span>}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : sk.desc ? (
+            <div className="skill-field">
+              <label className="skill-field-label">
+                <SIcon name="more" size={11} /> Description
+              </label>
+              <div className="skill-field-box">{sk.desc}</div>
+            </div>
+          ) : null}
 
           {/* meta — horizontal row */}
           <div className="skill-meta-row">

@@ -154,20 +154,18 @@ function ImportModal({ open, onClose, onAudit }: ImportModalProps) {
 
         <div className="jim-body">
           <p className="jim-note">
-            Add skills from a folder or a GitHub repo. Every one is audited for prompt injection and
-            unsafe code before it can reach an agent — clean skills land in your library, risky ones
-            are quarantined.
+            Every skill is audited for prompt injection before it can reach an agent.
           </p>
 
           <div className="ob-choice-grid">
             <button className="ob-region ob-choice" onClick={openFolder}>
               <span className="ob-choice-glyph"><SIcon name="folder" size={18} /></span>
               <div className="ob-choice-name">Upload a folder</div>
-              <div className="ob-choice-hint">~/.claude/skills · ~/.codex/skills · ~/.openclaw/skills · ~/.hermes/skills</div>
+              <div className="ob-choice-hint">Drop a skills folder</div>
             </button>
 
             <div className="ob-region ob-choice ob-choice-gh">
-              <span className="ob-choice-glyph"><SIcon name="git" size={18} /></span>
+              <span className="ob-choice-glyph"><SIcon name="github" size={18} /></span>
               <div className="ob-choice-name">From GitHub</div>
               <div className="ob-gh-row">
                 <input
@@ -194,15 +192,29 @@ function ImportModal({ open, onClose, onAudit }: ImportModalProps) {
                 <div className="ob-grp" key={g.id}>
                   <div className="ob-grp-head">
                     <span className="ob-grp-ico">
-                      <SIcon name={g.kind === "github" ? "git" : "folder"} size={14} />
+                      <SIcon name={g.kind === "github" ? "github" : "folder"} size={14} />
                     </span>
                     <span className="ob-grp-label">{g.label}</span>
                     <span className="ob-grp-sub">{g.sub}</span>
-                    {g.skills.length > 0 && <span className="ob-grp-count">{g.skills.length}</span>}
+                    {g.skills.length > 0 && (
+                      <span className="ob-grp-count">
+                        {g.skills.length} skill{g.skills.length > 1 ? "s" : ""}
+                      </span>
+                    )}
                     <button className="ob-grp-x" title="Remove source" onClick={() => removeGroup(g.id)}>
                       <SIcon name="x" size={13} />
                     </button>
                   </div>
+                  {g.skills.length > 0 && (
+                    <div className="ob-grp-list">
+                      {g.skills.map((sk) => (
+                        <div className="ob-skrow" key={sk.id}>
+                          <span className="ob-skrow-ico"><SIcon name="skills" size={13} /></span>
+                          <span className="ob-skrow-name">{sk.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

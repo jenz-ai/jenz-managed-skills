@@ -49,12 +49,15 @@
   font-weight: 500;
 }
 .js-title .js-logo {
-  width: 18px; height: 18px;
-  border-radius: 5px;
+  width: 22px; height: 22px;
+  border-radius: 6px;
   background: linear-gradient(135deg, var(--accent), oklch(0.55 0.14 320));
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--accent-fg);
 }
+/* The pixel-eye mark reads as a crisp cut-out on the gradient chip; pull the
+   pupil from the gradient base so it doesn't punch a hard --bg-0 hole. */
+.js-title .js-logo .lg-pupil { fill: var(--accent) !important; }
 .js-title .js-title-sub { color: var(--fg-3); font-weight: 400; }
 .js-titlebar-end {
   margin-left: auto;
@@ -1154,6 +1157,62 @@
 /* findings */
 .jsd-findings { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
 
+/* threat summary — replaces the raw desc dump on a flagged skill */
+.skill-threat {
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  background: var(--bg-1);
+  padding: 12px 14px;
+}
+.skill-threat.malicious { border-color: var(--danger-line); background: var(--danger-soft); }
+.skill-threat.suspicious { border-color: var(--warn-line); background: var(--warn-soft); }
+.skill-threat-head {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+  letter-spacing: -0.01em;
+}
+.skill-threat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.skill-threat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  color: var(--fg-1);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.skill-threat-chip.malicious { border-color: var(--danger-line); color: var(--danger); }
+.skill-threat-chip.suspicious { border-color: var(--warn-line); color: var(--warn); }
+.skill-threat-chip .stc-n {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* meta row — keep the · separators evenly spaced */
+.skill-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+.skill-meta-pill,
+.skill-meta-item { display: inline-flex; align-items: center; gap: 5px; }
+.skill-meta-sep { color: var(--fg-4); }
+
 /* quarantine action bar */
 .jsd-quar {
   border: 1px solid var(--danger-line);
@@ -1763,6 +1822,21 @@ button.ob-region:hover { border-color: var(--accent-line); background: var(--bg-
 }
 .ob-grp-x { color: var(--fg-3); display: inline-flex; padding: 4px; border-radius: 6px; }
 .ob-grp-x:hover { background: var(--bg-3); color: var(--danger); }
+/* expanded per-skill list under a staged folder group — one row per skill,
+   stacked vertically so an N-skill folder reads as N skills (not just a count). */
+.ob-grp-list {
+  display: flex; flex-direction: column;
+  border-top: 1px solid var(--line-1);
+}
+.ob-skrow {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px 8px 14px;
+  font-size: 12.5px; color: var(--fg-1);
+}
+.ob-skrow + .ob-skrow { border-top: 1px solid var(--line-1); }
+.ob-skrow-ico { color: var(--accent); display: inline-flex; flex-shrink: 0; }
+.ob-skrow-name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .ob-grp-skills { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 11px; }
 .ob-skchip {
   display: inline-flex; align-items: center; gap: 5px;

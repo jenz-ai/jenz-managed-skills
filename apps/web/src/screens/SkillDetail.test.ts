@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { deriveFiles, parseSkillFileBody, gateBlockedMessage } from "./SkillDetail";
+import { deriveFiles, parseSkillFileBody, gateBlockedMessage, summarizeThreat } from "./SkillDetail";
 import { SKILLS } from "../data/skills.fixtures";
-import type { MdLine, Skill } from "../state/types";
+import type { Finding, MdLine, Skill } from "../state/types";
+
+const mkFinding = (type: string, file: string): Finding => ({
+  type,
+  sev: "high",
+  file,
+  line: 1,
+  snippet: [],
+});
 
 const byId = (id: string): Skill => {
   const s = SKILLS.find((x) => x.id === id);
@@ -73,6 +81,53 @@ describe("parseSkillFileBody", () => {
   it("emits no blocks for an empty document", () => {
     const empty: MdLine[] = [];
     expect(parseSkillFileBody(empty, "x", "")).toEqual([]);
+  });
+});
+
+describe("summarizeThreat", () => {
+  it("counts total findings and distinct files", () => {
+    const s = summarizeThreat([
+      mkFinding("instruction-override", "SKILL.md"),
+      mkFinding("hidden-unicode", "SKILL.md"),
+      mkFinding("credential-access", "run.sh"),
+    ]);
+    expect(s.count).toBe(3);
+    expect(s.fileCount).toBe(2);
+  });
+
+  it("de-duplicates finding types and counts repeats", () => {
+    const s = summarizeThreat([
+      mkFinding("credential-access", "a.sh"),
+      mkFinding("credential-access", "b.sh"),
+      mkFinding("hidden-unicode", "SKILL.md"),
+    ]);
+    expect(s.types).toHaveLength(2);
+    const cred = s.types.find((t) => t.type === "credential-access");
+    expect(cred?.n).toBe(2);
+    const uni = s.types.find((t) => t.type === "hidden-unicode");
+    expect(uni?.n).toBe(1);
+  });
+
+  it("preserves first-seen order of distinct types", () => {
+    const s = summarizeThreat([
+      mkFinding("z-type", "a"),
+      mkFinding("a-type", "b"),
+      mkFinding("z-type", "c"),
+    ]);
+    expect(s.types.map((t) => t.type)).toEqual(["z-type", "a-type"]);
+  });
+
+  it("returns zeros and an empty type list for no findings", () => {
+    const s = summarizeThreat([]);
+    expect(s).toEqual({ count: 0, fileCount: 0, types: [] });
+  });
+
+  it("derives a real summary from a flagged fixture", () => {
+    const sk = byId("meeting-notes-sync");
+    const s = summarizeThreat(sk.findings);
+    expect(s.count).toBe(sk.findings.length);
+    // run.sh + SKILL.md ⇒ 2 distinct files
+    expect(s.fileCount).toBe(2);
   });
 });
 
