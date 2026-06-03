@@ -3,51 +3,65 @@ import { prefilter } from './prefilter';
 import { scoreRisk } from './score';
 import { runAuditPass, type ModelFinding, type ModelAudit } from './openrouter';
 
+/** Injectable model-pass runner (default = runAuditPass) so tests can supply a
+ *  plain throwing/stub function — no vi.fn, so vitest can't misreport a caught throw. */
+export type ModelPassRunner = (
+  raw: RawSkill,
+  opts?: { temperature?: number; signal?: AbortSignal },
+) => Promise<ModelAudit>;
+
 /**
  * The audit engine — replaces the stub. Pure-ish orchestrator (no DB, no HTTP
  * framework): runs the L1 regex prefilter and, when a model is configured, two
  * tool-less semantic passes, then lets the HOST compute the verdict.
  *
  *   prefilter (regex) ─┐
- *   model pass A ──────┼─ merge + dedupe ─→ scoreRisk(findings, passesAgree) ─→ Risk
+ *   model pass A ──────┼─ merge + dedupe ─→ scoreRisk(findings, passesHealthy) ─→ Risk
  *   model pass B ──────┘
  *
- * The model's `risk` is advisory only; `scoreRisk()` decides. Fail-closed:
+ * "Model advises, host decides on EVIDENCE." The model's advisory `risk` label
+ * never gates the verdict; only findings (+ pass health) do. Fail-closed:
  *  - No OPENROUTER_API_KEY → regex-only dev mode (documented degradation).
- *  - Key set but a pass throws → we cannot certify 'safe' → passes "disagree".
+ *  - A pass throws/fails → cannot certify 'safe' → fail closed (never 'safe').
+ *  - Two completed passes that find nothing → 'safe' even if their advisory
+ *    labels differ (a label-only disagreement with zero evidence must not block).
  */
 export async function auditSkill(
   raw: RawSkill,
   onProgress?: (msg: string) => void,
+  runPass: ModelPassRunner = runAuditPass,
 ): Promise<AuditedSkill> {
   onProgress?.('prefilter: scanning skill bytes');
   const regexFindings = prefilter(raw);
 
   let modelFindings: Finding[] = [];
-  let passesAgree = true; // regex-only baseline: nothing to disagree with
+  // Confidence gate fed to scoreRisk: true → host may certify 'safe'; false →
+  // never 'safe'. It reflects whether the semantic passes ran HEALTHILY — NOT
+  // whether their advisory labels agree (see contract above).
+  let passesHealthy = true; // regex-only baseline: no model to fail
 
   if (process.env.OPENROUTER_API_KEY) {
     onProgress?.('semantic audit: 2 tool-less passes');
     const temperature = Number(process.env.AUDIT_TEMPERATURE) || 0.4;
     const [passA, passB] = await Promise.all([
-      tryPass(raw, temperature),
-      tryPass(raw, temperature),
+      tryPass(runPass, raw, temperature),
+      tryPass(runPass, raw, temperature),
     ]);
 
     if (passA && passB) {
-      passesAgree = passA.risk === passB.risk;
+      // Both passes completed → trust the merged EVIDENCE, not advisory labels.
       modelFindings = [...passA.findings, ...passB.findings].map(toFinding);
     } else {
       // A pass failed → fail-closed: never let a model outage certify 'safe'.
       onProgress?.('semantic audit incomplete; fail-closed');
-      passesAgree = false;
+      passesHealthy = false;
     }
   } else {
     onProgress?.('regex-only mode (no OPENROUTER_API_KEY configured)');
   }
 
   const findings = dedupe([...regexFindings, ...modelFindings]);
-  const risk = scoreRisk(findings, passesAgree);
+  const risk = scoreRisk(findings, passesHealthy);
   onProgress?.(`verdict: ${risk} (${findings.length} finding(s))`);
 
   return {
@@ -60,11 +74,15 @@ export async function auditSkill(
   };
 }
 
-/** Run one model pass, swallowing rejection to null so a single failure can
- *  never leak an unhandled rejection — the caller fails closed on a null. */
-async function tryPass(raw: RawSkill, temperature: number): Promise<ModelAudit | null> {
+/** Run one model pass, swallowing failure to null so the caller can fail closed
+ *  on a null without a single outage rejecting the whole audit. */
+async function tryPass(
+  run: ModelPassRunner,
+  raw: RawSkill,
+  temperature: number,
+): Promise<ModelAudit | null> {
   try {
-    return await runAuditPass(raw, { temperature });
+    return await run(raw, { temperature });
   } catch {
     return null;
   }

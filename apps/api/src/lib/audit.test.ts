@@ -4,7 +4,7 @@ import type { RawSkill } from '@jenz/shared';
 // Never hit the network — the model transport is mocked.
 vi.mock('./openrouter', () => ({ runAuditPass: vi.fn() }));
 import { runAuditPass } from './openrouter';
-import { auditSkill } from './audit';
+import { auditSkill, type ModelPassRunner } from './audit';
 
 const mockPass = vi.mocked(runAuditPass);
 
@@ -92,20 +92,25 @@ describe('auditSkill orchestrator', () => {
       expect(out.risk).toBe('suspicious');
     });
 
-    // SKIPPED — vitest harness artifact, NOT a product bug. Diagnostic proof:
-    // with `mockImplementation(() => { throw })`, auditSkill() returns risk
-    // 'suspicious' and the mock is called twice (tryPass catches both throws and
-    // fails closed correctly). The assertion passes — but vitest still marks the
-    // test failed because it surfaces the Error thrown inside the mock impl even
-    // though app code catches it. The fail-closed *scoring* is covered by
-    // score.test.ts (scoreRisk([], false) → 'suspicious'); the throw→fail-closed
-    // glue is verified live. TODO(post-compact): retest via a pure helper.
-    it.skip('fail-closed: a pass throws → never safe (verified live + diagnostic)', async () => {
-      mockPass.mockImplementation(() => {
+    it('fail-closed: a pass that fails → never safe (suspicious) for a clean skill', async () => {
+      // Real coverage via dependency injection: a PLAIN throwing runner (not a
+      // vi.fn) exercises fail-closed without vitest misreporting the caught throw.
+      // A failed pass → passesHealthy=false → never 'safe'.
+      const throwingRunner: ModelPassRunner = () => {
         throw new Error('network down');
-      });
-      const out = await auditSkill(benign);
+      };
+      const out = await auditSkill(benign, undefined, throwingRunner);
       expect(out.risk).toBe('suspicious');
+    });
+
+    it('both passes complete, ZERO findings, disagreeing labels → safe (no false positive)', async () => {
+      // "Model advises, host decides on EVIDENCE": advisory-label disagreement
+      // with no evidence must NOT block a clean skill. (Codex-flagged policy bug.)
+      mockPass
+        .mockResolvedValueOnce({ risk: 'safe', findings: [] })
+        .mockResolvedValueOnce({ risk: 'suspicious', findings: [] });
+      const out = await auditSkill(benign);
+      expect(out.risk).toBe('safe');
     });
 
     it('regex critical still wins even if the model says safe', async () => {
