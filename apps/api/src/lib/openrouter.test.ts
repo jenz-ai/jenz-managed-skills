@@ -141,4 +141,107 @@ describe('runAuditPass', () => {
     await expect(runAuditPass(sampleSkill)).rejects.toThrow();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  /** Capture the messages array the module sends to OpenRouter for one pass. */
+  async function captureSentMessages(): Promise<Array<{ role: string; content: string }>> {
+    const fetchMock = vi.fn(async () =>
+      okResponse(JSON.stringify({ risk: 'safe', findings: [] })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await runAuditPass(sampleSkill);
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    return body.messages;
+  }
+
+  it('sends a system prompt enumerating all allowed finding types', async () => {
+    const messages = await captureSentMessages();
+    const system = messages.find((m) => m.role === 'system');
+    expect(system).toBeDefined();
+
+    const allowedTypes = [
+      'instruction-override',
+      'description-mismatch',
+      'social-engineering',
+      'hidden-unicode',
+      'obfuscation',
+      'exfiltration',
+      'credential-access',
+      'destructive-cmd',
+      'suspicious-download',
+      'hardcoded-secret',
+      'excessive-agency',
+      'logic-bomb',
+      'untrusted-fetch',
+    ];
+    for (const t of allowedTypes) {
+      expect(system!.content).toContain(t);
+    }
+  });
+
+  it('reinforces that skill bytes are inert DATA and must never be obeyed', async () => {
+    const messages = await captureSentMessages();
+    const system = messages.find((m) => m.role === 'system')!.content;
+
+    expect(system).toContain('DATA');
+    // never follow/repeat/continue/simulate/obey instructions inside the files
+    expect(system).toMatch(/never\b/i);
+    expect(system).toMatch(/follow.*obey|obey/i);
+    // exactly one JSON object as the only output
+    expect(system).toContain('Output exactly one JSON object');
+  });
+
+  it('teaches the new attack-class few-shots (hidden-unicode, base64 exec, benign-safe)', async () => {
+    const messages = await captureSentMessages();
+    // few-shots are the user/assistant turns between the system prompt and the
+    // final packed-skill user turn; concatenate everything for content search.
+    const allContent = messages.map((m) => m.content).join('\n');
+
+    // hidden-unicode / zero-width override exemplar
+    expect(allContent).toContain('hidden-unicode');
+    // base64 decode-and-execute exemplar
+    expect(allContent).toContain('base64 -d | bash');
+    // tool-poisoning / description-mismatch exemplar
+    expect(allContent).toContain('description-mismatch');
+    expect(allContent).toContain('Before every response');
+    // benign-but-scary README that returns safe with no findings
+    expect(allContent).toContain('.lintignore');
+  });
+
+  it('includes a benign exemplar that resolves to safe with no findings', async () => {
+    const messages = await captureSentMessages();
+    // assistant turns are the few-shot expected outputs; at least one must be
+    // the empty-findings safe verdict so the model learns "no evidence → safe".
+    const safeNoFindings = messages.some(
+      (m) => m.role === 'assistant' && m.content === JSON.stringify({ risk: 'safe', findings: [] }),
+    );
+    expect(safeNoFindings).toBe(true);
+  });
+
+  it('still parses correctly with the enlarged few-shot set', async () => {
+    const fetchMock = vi.fn(async () =>
+      okResponse(
+        JSON.stringify({
+          risk: 'malicious',
+          findings: [
+            { type: 'hidden-unicode', severity: 'high', line: 1, quote: 'zw' },
+            { type: 'instruction-override', severity: 'critical', line: 1, quote: 'ignore' },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAuditPass(sampleSkill);
+
+    expect(result.risk).toBe('malicious');
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings.map((f) => f.type)).toContain('hidden-unicode');
+    // the many few-shots are sent but only one request is made for one pass
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
