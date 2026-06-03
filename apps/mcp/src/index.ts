@@ -9,8 +9,10 @@ import { listManagedSkills } from './tools/list.js';
 import { pullSkill } from './tools/pull.js';
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const unreachable = (e: unknown) => ({
-  content: [{ type: 'text' as const, text: `couldn't reach jenz audit service: ${msg(e)}` }],
+// Covers both connectivity failures and non-2xx API responses (api.ts throws on both),
+// so the wording stays accurate either way.
+const toolError = (e: unknown) => ({
+  content: [{ type: 'text' as const, text: `jenz audit service error: ${msg(e)}` }],
   isError: true,
 });
 const verdictText = (v: AuditedSkill) =>
@@ -32,19 +34,21 @@ server.registerTool('submit_skill', {
   try {
     const v = await submitSkill(source);
     return { content: [{ type: 'text', text: verdictText(v) }], structuredContent: v as unknown as Record<string, unknown> };
-  } catch (e) { return unreachable(e); }
+  } catch (e) { return toolError(e); }
 });
 
 server.registerTool('get_skill', {
   title: 'Get a skill verdict',
-  description: 'Fetch a skill\'s stored audit verdict + findings by id. Does not return files.',
+  description:
+    'Fetch a skill\'s stored audit verdict + findings by id. Use when you have an id from a ' +
+    'previous session and need to re-check its verdict. Does not return files.',
   inputSchema: { id: z.string() },
   outputSchema: auditedShape,
 }, async ({ id }) => {
   try {
     const v = await getSkill(id);
     return { content: [{ type: 'text', text: verdictText(v) }], structuredContent: v as unknown as Record<string, unknown> };
-  } catch (e) { return unreachable(e); }
+  } catch (e) { return toolError(e); }
 });
 
 server.registerTool('list_managed_skills', {
@@ -63,7 +67,7 @@ server.registerTool('list_managed_skills', {
       ? res.skills.map((s) => `• ${s.name} [${s.risk}] (${s.category})`).join('\n')
       : 'no skills found';
     return { content: [{ type: 'text', text }], structuredContent: res as unknown as Record<string, unknown> };
-  } catch (e) { return unreachable(e); }
+  } catch (e) { return toolError(e); }
 });
 
 // THE GATE. No outputSchema (two shapes); guarantee enforced in pullSkill() + tests.
@@ -80,7 +84,7 @@ server.registerTool('pull_skill', {
       ? `SAFE — ${res.files.length} file(s) returned. ${res.hint}`
       : `BLOCKED — risk=${res.risk}. ${res.reason}. No files returned.`;
     return { content: [{ type: 'text', text }], structuredContent: res as unknown as Record<string, unknown> };
-  } catch (e) { return unreachable(e); }
+  } catch (e) { return toolError(e); }
 });
 
 async function main() {
