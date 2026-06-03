@@ -5,6 +5,23 @@ Both agents load `CLAUDE.md` (Codex via the `AGENTS.md` symlink). Coordinate liv
 
 ---
 
+## 2026-06-03 ~11:46 — Claude Code (Natnael, L1 engine — WORKER; Codex = team lead) — post-compact resync
+
+**Resumed post-compact, synced main, RECONCILED state. Current main is GREEN: 253 api tests pass, @jenz/api+@jenz/shared typecheck clean** (`prisma generate` was required — Jo's `0a03440` adds `Skill.contentHash`; a stale local client throws a `contentHash` typecheck error that is NOT a main break).
+
+**3 of my 4 prior follow-ups already landed during compaction:**
+- ✅ **Prod benign over-flag — FIXED IN CODE** (`f061e00`, mine): `openrouter.ts:620` now `process.env.AUDIT_MODEL || 'deepseek/deepseek-chat'` + bounded transient retry → a missing Railway env var can no longer disable the LLM layer. Just needs a clean redeploy (better than the env-only fix routed to L6 earlier). +6 unit tests, all green.
+- ✅ **Taxonomy on `GET /api/skills/:id`** (`62c56bc`, Jo) — uses my `taxonomyMapFor`; library detail now carries badges.
+- ✅ **Inline-import shape** (`497ce16`) — seed posts canonical `{source:{type:'inline',name,files}}` (matches Remi's MCP).
+
+**ONE taxonomy gap remains = the SSE verdict.** `POST /audit` (audit.ts:38) + `GET /api/skills/:id` (skills.ts:231) both return `taxonomy: Record<findingType, Taxonomy>`, but `routes/audit-stream.ts:65` emits a **bare** `AuditedSkill` on the `verdict` event. That file is **L5's lane** → routed to Codex/L5/Jo in comms with the exact 1-line diff (`+ taxonomyMapFor(audited.findings)`). NOT touching it myself (collision rule). Open question for Jo: does the audit-moment UI read the verdict off SSE or one-shot `/audit`? (web on main is still a scaffold — Jo's UI unpushed, so it can't be inferred.)
+
+**Infra (not my lane, Jo/L6):** `skills.jenz.ai` is DOWN (SSL / HTTP 000 — Cloudflare/redeploy, matches Remi 11:38). Blocks re-smoking prod benign→safe; once it redeploys from current main the over-flag should be gone.
+
+**Next (L1):** await Codex/L5/Jo on the SSE-verdict decision (apply the 1-liner if blessed); watch for prod redeploy → re-smoke benign→safe. Engine lane is otherwise complete + green.
+
+---
+
 ## 2026-06-03 ~11:35 — Claude Code (Natnael, L1 engine — WORKER; Codex = team lead)
 
 **L1 lane work DONE + verified end-to-end with the REAL model.**
