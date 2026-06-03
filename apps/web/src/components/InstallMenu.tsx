@@ -78,13 +78,19 @@ export function InstallMenu({
             <div className="inst-menu-head">{head}</div>
             {TARGETS.map((t) => {
               const isIn = installed.includes(t.id);
+              // Tint each logo in its brand color: real brand hex for the
+              // official marks, the per-target oklch hue for the demo runtimes.
+              const tint =
+                t.icon === "claude" ? "#D97757"
+                : t.icon === "openai" ? "var(--fg-1)"
+                : `oklch(0.80 0.10 ${t.hue})`;
               return (
                 <DropdownMenu.Item
                   key={t.id}
                   className={"inst-opt" + (isIn ? " installed" : "")}
                   onSelect={() => onInstall(t.id)}
                 >
-                  <span className="io-badge" style={{ color: `oklch(0.80 0.10 ${t.hue})` }}>{t.badge}</span>
+                  <span className="io-badge" style={{ color: tint }}><SIcon name={t.icon} size={15} /></span>
                   <span className="io-body">
                     <span className="io-name">{t.name}</span>
                     <span className="io-path">{t.path}</span>
