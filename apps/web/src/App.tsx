@@ -1,122 +1,220 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+// Jenz Skills — app root. Owns the state machine (screen × view + aux state),
+// titlebar, sidebar, breadcrumb, main pane, toast. Ports skills-app.jsx App().
+// Screen panes are wired through ScreenSlot; later tasks replace the slots
+// with the real Audit / Library / SkillDetail / AuditHome / Settings screens.
+import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { SIcon } from "./components/SIcon";
+import { Sidebar } from "./shell/Sidebar";
+import { Breadcrumb } from "./shell/Breadcrumb";
+import { TARGET_BY_ID } from "./data/targets";
+import { CATEGORIES, SKILLS, SOURCE_LABEL } from "./data/skills";
+import type { MdLine, Screen, Skill, View } from "./state/types";
+import { ScreenSlot } from "./shell/ScreenSlot";
 
-function App() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+interface Toast {
+  msg: ReactNode;
+  id: number;
 }
 
-export default App
+export default function App() {
+  const [screen, setScreen] = useState<Screen>("onboarding");
+  const [view, setView] = useState<View>("audits");
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [skillId, setSkillId] = useState<string | null>(null);
+  const [runKey, setRunKey] = useState(0);
+  const [skills, setSkills] = useState<Skill[]>(() => SKILLS.map((s) => ({ ...s })));
+  const [categories, setCategories] = useState<string[]>(() => CATEGORIES.slice());
+  const [installs, setInstalls] = useState<Record<string, string[]>>({});
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    document.body.classList.toggle("light", theme === "light");
+  }, [theme]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2600);
+    return () => clearTimeout(t);
+  }, [toast]);
+  const notify = (msg: ReactNode) => setToast({ msg, id: Date.now() });
+
+  const skill = useMemo(() => skills.find((s) => s.id === skillId), [skills, skillId]);
+
+  const nav = (v: View, cat?: string | null) => {
+    setView(v);
+    if (v === "library") setActiveCategory(cat ?? null);
+    if (v !== "detail") setSkillId(null);
+  };
+  const openSkill = (arg: string | Skill) => {
+    const id = typeof arg === "string" ? arg : arg.id;
+    setSkillId(id);
+    setView("detail");
+  };
+
+  const startImport = () => {
+    setRunKey((k) => k + 1);
+    setView("audit");
+    setScreen("app");
+  };
+
+  const moveSkill = (id: string, cat: string) => {
+    const sk = skills.find((s) => s.id === id);
+    if (!sk || sk.category === cat) return;
+    setSkills((arr) => arr.map((s) => (s.id === id ? { ...s, category: cat } : s)));
+    notify(<><b>{sk.name}</b> moved to <b>{cat}</b></>);
+  };
+  const addCategory = (name: string) => {
+    if (categories.includes(name)) { notify(<><b>{name}</b> already exists</>); return; }
+    setCategories((c) => [...c, name]);
+    notify(<>Folder <b>{name}</b> created</>);
+  };
+  const addSkill = (cat: string, name: string) => {
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "skill-" + Date.now();
+    if (skills.some((s) => s.id === id)) { notify(<><b>{id}</b> already exists</>); return; }
+    const md: MdLine[] = [
+      { n: 1, text: "---", kind: "com" }, { n: 2, text: "name: " + id }, { n: 3, text: "description: New skill — add a description." },
+      { n: 4, text: "category: " + cat }, { n: 5, text: "---", kind: "com" }, { n: 6, text: "" },
+      { n: 7, text: "# " + id, kind: "h" }, { n: 8, text: "" }, { n: 9, text: "Describe when an agent should use this skill." },
+    ];
+    setSkills((arr) => [...arr, { id, name: id, category: cat, source: "claude", risk: "safe", desc: "New skill — add a description.", findings: [], skillMd: md, files: 1 }]);
+    notify(<>Skill <b>{id}</b> added to <b>{cat}</b></>);
+  };
+  const installOne = (id: string, target: string) => {
+    const sk = skills.find((s) => s.id === id);
+    const t = TARGET_BY_ID[target];
+    setInstalls((m) => ({ ...m, [id]: Array.from(new Set([...(m[id] || []), target])) }));
+    if (sk && t) notify(<><b>{sk.name}</b> installed to <b>{t.name}</b></>);
+  };
+  const bulkInstall = (target: string, ids: string[]) => {
+    const t = TARGET_BY_ID[target];
+    setInstalls((m) => {
+      const next = { ...m };
+      ids.forEach((id) => {
+        const cur = next[id] || [];
+        if (!cur.includes(target)) next[id] = [...cur, target];
+      });
+      return next;
+    });
+    if (t) notify(<>Installed <b>{ids.length}</b> skills to <b>{t.name}</b></>);
+  };
+
+  // ---- quarantine actions ----
+  const deleteSkill = (id: string) => {
+    const sk = skills.find((s) => s.id === id);
+    setSkills((arr) => arr.filter((s) => s.id !== id));
+    setSkillId(null);
+    setView("quarantine");
+    if (sk) notify(<><b>{sk.name}</b> deleted from the workspace</>);
+  };
+  const reportSkill = (id: string) => {
+    const sk = skills.find((s) => s.id === id);
+    setSkills((arr) => arr.map((s) => (s.id === id ? { ...s, reported: true } : s)));
+    if (sk) notify(<>Reported <b>{sk.name}</b> to {SOURCE_LABEL[sk.source]} + threat feed</>);
+  };
+  const rescanSkill = (id: string) => {
+    const sk = skills.find((s) => s.id === id);
+    if (sk) notify(<>Re-scan complete — <b>{sk.findings.length} finding{sk.findings.length > 1 ? "s" : ""}</b> still present. Still quarantined.</>);
+  };
+  const approveSkill = (id: string) => {
+    const sk = skills.find((s) => s.id === id);
+    setSkills((arr) => arr.map((s) => (s.id === id ? { ...s, risk: "safe", overridden: true, findings: [] } : s)));
+    setSkillId(null);
+    if (sk) {
+      setActiveCategory(sk.category);
+      setView("library");
+      notify(<>Override accepted — <b>{sk.name}</b> moved to <b>{sk.category}</b></>);
+    }
+  };
+
+  const runImport = () => { setImportOpen(false); startImport(); };
+
+  if (screen === "onboarding") {
+    return (
+      <div className="js-win">
+        <div className="js-titlebar">
+          <div className="js-title">
+            <span className="js-logo"><SIcon name="shield-check" size={12} /></span>
+            jenz managed skills <span className="js-title-sub">· setup</span>
+          </div>
+        </div>
+        <div className="js-shell" style={{ gridTemplateColumns: "1fr" }}>
+          <div className="js-main">
+            <ScreenSlot kind="onboarding" props={{ onImport: startImport }} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="js-win">
+      <div className="js-titlebar">
+        <div className="js-title">
+          <span className="js-logo"><SIcon name="shield-check" size={12} /></span>
+          jenz managed skills <span className="js-title-sub">· Bicone</span>
+        </div>
+        <div className="js-titlebar-end"><SIcon name="shield-check" size={13} /> auditor online</div>
+      </div>
+
+      <div className="js-shell">
+        <Sidebar
+          view={view} activeCategory={activeCategory} skillId={skillId}
+          skills={skills} categories={categories}
+          onNav={nav} onOpenSkill={openSkill}
+          onAddCategory={addCategory} onAddSkill={addSkill} onDropSkill={moveSkill}
+          dragging={dragging} onDragStart={setDragging} onDragEnd={() => setDragging(null)}
+          onImport={() => setImportOpen(true)}
+          theme={theme} onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+          onLogout={() => { setScreen("onboarding"); setView("audits"); }}
+        />
+        <div className="js-main">
+          <Breadcrumb view={view} activeCategory={activeCategory} skill={skill} onNav={nav} />
+          {view === "audits" && (
+            <div className="js-body">
+              <ScreenSlot kind="auditHome" props={{ onImport: () => setImportOpen(true), onOpenQuarantine: () => nav("quarantine") }} />
+            </div>
+          )}
+          {view === "settings" && <ScreenSlot kind="settings" props={{}} />}
+          {view === "audit" && (
+            <div className="js-body">
+              <ScreenSlot kind="audit" props={{ runKey, onDone: (v: View) => nav(v, null), onOpenSkill: openSkill }} />
+            </div>
+          )}
+          {(view === "library" || view === "quarantine") && (
+            <div className="js-body">
+              <ScreenSlot
+                kind="library"
+                props={{
+                  mode: view, activeCategory, skills, installs,
+                  onOpenSkill: openSkill, onBulkInstall: bulkInstall,
+                  onDragStart: setDragging, onDragEnd: () => setDragging(null), draggingId: dragging,
+                }}
+              />
+            </div>
+          )}
+          {view === "detail" && skill && (
+            <ScreenSlot
+              kind="detail"
+              props={{
+                sk: skill, installed: installs[skill.id] || [], onInstall: installOne,
+                onDelete: deleteSkill, onReport: reportSkill, onRescan: rescanSkill, onApprove: approveSkill,
+              }}
+            />
+          )}
+        </div>
+      </div>
+
+      {toast && (
+        <div className="js-toast" key={toast.id}>
+          <span className="jt-ico"><SIcon name="check-circle" size={16} /></span>
+          <span>{toast.msg}</span>
+        </div>
+      )}
+      <ScreenSlot kind="importModal" props={{ open: importOpen, onClose: () => setImportOpen(false), onAudit: runImport }} />
+    </div>
+  );
+}
