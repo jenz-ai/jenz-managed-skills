@@ -5,6 +5,36 @@ Both agents load `CLAUDE.md` (Codex via the `AGENTS.md` symlink). Coordinate liv
 
 ---
 
+## 2026-06-03 ~13:40 — Claude Code (Natnael, L1/lead) — ⭐ CLAUDE CHAT REMOTE-MCP SPIKE documented + COMPACTION HANDOFF
+
+**Pre-compaction consolidation. Read this entry first to resume the Natnael/lead session.**
+
+### ✅ Delivered this session — Claude Chat (remote) MCP connector: ANALYZED + DOCUMENTED
+**`docs/claude-chat-mcp-remote.md`** (pushed; commits `b3c98e6` + `25ca6f1`). Full cited, implementation-ready spec, synthesized from a **7-agent `TeamCreate` team** (6 parallel research facets — code/SDK/hosting/connector/auth/verify — + a `comms-watch`) and verified against the code. **P2 / future-user story — additive, NOT demo-critical; nothing in `apps/api` was touched.**
+- **Code = entrypoint swap:** new `apps/mcp/src/server.ts` (`createServer()` factory) + new `apps/mcp/src/http.ts` (stateless `StreamableHTTPServerTransport`, SDK 1.29.0, `enableJsonResponse`+CORS+`0.0.0.0:$PORT`+2 MB body guard); `index.ts` trims to the stdio bind. **Zero changes to api/schemas/tools/tests** — stdio (Claude Code) path untouched. Full code in §1.
+- **Host = a 2nd Railway service** in the same project → `mcp.jenz.ai` (~1–1.5 h; reuses `railway.toml` pattern; `tsx`-on-source; `JENZ_API=https://api.jenz.ai/api`, no DB/model keys). Cloudflare Workers `McpAgent` = post-MVP OAuth path. ⚠️ `pnpm install --frozen-lockfile` first (local `node_modules` stale).
+- **claude.ai connector:** Streamable HTTP + public HTTPS + **authless supported**. Limits: ~150k-char result (→ `pull_skill` manifest/truncate, §5a) + 300 s (audit ~50 s, fine).
+- **⚠️ Real abuse surface (separable from demo):** agent API wide-open + **uncapped inline imports** (`schemas.ts:8`, `skills.ts:339`) → public MCP = unlimited unauth'd PAID audits + DoS. Add body-cap + per-IP rate-limit + daily ceiling before public exposure (§6b).
+- **Prod auth = OAuth via Supabase OAuth 2.1 Server** (turnkey, beta/free) BUT claude.ai ignores external-IdP metadata (Anthropic issue #82) → MCP must front Supabase with **root OAuth proxy routes + RFC 9728 `/.well-known/oauth-protected-resource` at root**; keep `aud="authenticated"`; per-user workspaces need a graceful `attachWorkspace` mw + `workspaceId` scoping in `skills.ts` (cosmetic today). §6c.
+
+### 📡 Demo-critical state (from `comms-watch` digest — current, not my lane)
+- **Prod GREEN:** gate verified live both ways; white-screen crash fixed (codex-audit 13:25); eval **100% recall @ 0% FP / 59 cases**. API=`api.jenz.ai/api`, FE=`skills.jenz.ai`.
+- **get_skill taxonomy drift — ✅ FIXED by Remi `67b40b3`.**
+- **Jo open item:** demo library shows **9 rows, not 8** (repo-ROOT import) → `prune:demo --apply`.
+- **Demo flow locked (Jo):** import skills by GitHub **subdir** URL (not root, not folder-upload).
+
+### My L1 engine lane (unchanged — done)
+Done/green/prod-verified: P0 (SSE mount + dotenv), P1 (`/audit` taxonomy), prod model fix (`f061e00`), taxonomy on `/api/skills/:id`. **Codex = team lead, Natnael = L1 worker.** No L1 code items open.
+
+### Team / housekeeping
+- `claude-chat-mcp` TeamCreate team: **all 7 agents shut down** (6 research + `comms-watch`). No dangling agents.
+- Also wrote `docs/demo-pitch-tips.md` this session (Michael Tefula demo advice — reframe security as an *enabler*; visceral knock-on-effect beat; distill the problem; 3+2 min format).
+
+### ▶ RESUME (post-compact)
+Read this entry + `docs/claude-chat-mcp-remote.md` + `cd ~/jenz-team-comms && ./comms.sh read --all`. Then **await the user's next instruction** (they'll direct after compacting). Keep rebase-looping WORKLOG pushes.
+
+---
+
 ## 2026-06-03 ~12:30 — Claude Code (Remi, MCP lane) — detection-measures doc + live MCP smoke (P3)
 
 **MCP lane verified end-to-end against prod; added a team reference doc for the detection measures.** No engine/code changes in Natnael's lane — docs + one live smoke.
