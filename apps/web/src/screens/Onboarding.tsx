@@ -231,6 +231,16 @@ function Onboarding({ onComplete }: OnboardingProps) {
     // MCP skills are pushed at runtime via the MCP server, not collected as ImportSources here.
   };
 
+  // Which staged groups are expanded to reveal their skill names.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const toggleExpand = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   // ---- staged groups list (shared) ----
   const StagedList = ({ removableSkills }: { removableSkills?: boolean }) => {
     if (!groups.length) return null;
@@ -238,21 +248,41 @@ function Onboarding({ onComplete }: OnboardingProps) {
       <div className="ob-staged">
         {groups.map((g) => (
           <div className="ob-grp" key={g.id}>
-            <div className="ob-grp-head">
+            <div
+              className="ob-grp-head"
+              style={{ cursor: "pointer" }}
+              onClick={() => toggleExpand(g.id)}
+              title={expanded.has(g.id) ? "Hide skills" : "Show skills"}
+            >
               <span className="ob-grp-ico">
                 <SIcon name={g.kind === "github" ? "git" : g.kind === "mcp" ? "terminal" : "folder"} size={14} />
               </span>
               <span className="ob-grp-label">{g.label}</span>
               <span className="ob-grp-sub">{g.sub}</span>
               <span className="ob-grp-count">{g.skills.length}</span>
-              <button className="ob-grp-x" title="Remove source" onClick={() => removeGroup(g.id)}><SIcon name="x" size={13} /></button>
+              {!removableSkills && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: "inline-flex",
+                    transition: "transform .15s ease",
+                    transform: expanded.has(g.id) ? "rotate(180deg)" : "none",
+                    color: "var(--fg-3)",
+                  }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M3 4.5 L6 7.5 L9 4.5" /></svg>
+                </span>
+              )}
+              <button className="ob-grp-x" title="Remove source" onClick={(e) => { e.stopPropagation(); removeGroup(g.id); }}><SIcon name="x" size={13} /></button>
             </div>
-            {removableSkills && (
+            {(removableSkills || expanded.has(g.id)) && (
               <div className="ob-grp-skills">
                 {g.skills.map((s) => (
                   <span className="ob-skchip" key={s.id}>
                     <SIcon name="skills" size={11} /> {s.name}
-                    <button className="ob-skchip-x" title="Remove" onClick={() => removeSkill(g.id, s.id)}><SIcon name="x" size={11} /></button>
+                    {removableSkills && (
+                      <button className="ob-skchip-x" title="Remove" onClick={() => removeSkill(g.id, s.id)}><SIcon name="x" size={11} /></button>
+                    )}
                   </span>
                 ))}
               </div>
