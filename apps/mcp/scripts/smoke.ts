@@ -1,7 +1,7 @@
-// End-to-end smoke / demo proof for @jenz/mcp.
+// End-to-end smoke / demo proof for @jenz-ai/skills-mcp.
 // Drives all 4 tools through a REAL stdio MCP client against the built server, asserting
 // the gate end-to-end. Default: spins up the in-process mock. Override to hit a real backend:
-//   JENZ_API=https://skills.jenz.ai/api JENZ_WORKSPACE=<token> pnpm --filter @jenz/mcp smoke
+//   JENZ_API=https://api.jenz.ai/api JENZ_WORKSPACE=<token> pnpm --filter @jenz-ai/skills-mcp smoke
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { serve } from '@hono/node-server';

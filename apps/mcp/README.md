@@ -18,12 +18,12 @@ pnpm --filter @jenz-ai/skills-mcp build
 ## Add to Claude Code (stdio)
 Published — npx one-liner (recommended):
 ```bash
-claude mcp add jenz-skills -e JENZ_API=https://skills.jenz.ai/api -- npx -y @jenz-ai/skills-mcp
+claude mcp add jenz-skills -e JENZ_API=https://api.jenz.ai/api -- npx -y @jenz-ai/skills-mcp
 ```
 From a local build (no publish needed):
 ```bash
 pnpm --filter @jenz-ai/skills-mcp build
-claude mcp add jenz-skills -e JENZ_API=https://skills.jenz.ai/api -- node /ABSOLUTE/PATH/apps/mcp/dist/index.js
+claude mcp add jenz-skills -e JENZ_API=https://api.jenz.ai/api -- node /ABSOLUTE/PATH/apps/mcp/dist/index.js
 ```
 The API is currently open — no workspace token needed. `JENZ_API` defaults to the local
 mock (`http://localhost:8787/api`) if unset, so set it to the live API for a real audit.
@@ -37,7 +37,7 @@ Drives all 4 tools through a real stdio MCP client and asserts the gate. Default
 in-process mock; point at a real backend by setting `JENZ_API`:
 ```bash
 pnpm --filter @jenz-ai/skills-mcp smoke                                  # against the mock
-JENZ_API=https://skills.jenz.ai/api JENZ_WORKSPACE=<token> \
+JENZ_API=https://api.jenz.ai/api JENZ_WORKSPACE=<token> \
   pnpm --filter @jenz-ai/skills-mcp smoke                                # against the real API
 ```
 Exits non-zero if any scenario fails (4 tools present, poison→blocked-no-files, safe→files, list).
