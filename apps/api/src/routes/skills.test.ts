@@ -273,4 +273,96 @@ describe('POST /api/skills/import', () => {
     expect(res.status).toBe(404);
     expect((await res.json()).error).toBe('not found');
   });
+
+  it('inline source: builds a RawSkill directly, persists, and the gate stays consistent', async () => {
+    const name = `${PREFIX}inline-a`;
+    const audited: AuditedSkill = {
+      slug: name,
+      name,
+      risk: 'safe',
+      findings: [],
+    };
+    vi.mocked(auditSkill).mockResolvedValue(audited);
+
+    const res = await importReq({
+      source: {
+        type: 'inline',
+        name,
+        files: [{ path: 'SKILL.md', content: '# Inline\n' }],
+      },
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.id).toBeDefined();
+    expect(body.slug).toBe(name);
+    expect(body.risk).toBe('safe');
+    expect(body.findings).toEqual([]);
+
+    // No GitHub fetch for inline.
+    expect(fetchSkillFromGitHub).not.toHaveBeenCalled();
+
+    // auditSkill received an inline RawSkill carrying the supplied files.
+    const passed = vi.mocked(auditSkill).mock.calls[0][0];
+    expect(passed.source).toBe('inline');
+    expect(passed.files).toEqual([{ path: 'SKILL.md', content: '# Inline\n' }]);
+
+    // Row persisted with the files.
+    const persisted = await prisma.skill.findUnique({
+      where: { id: body.id },
+      include: { files: true },
+    });
+    expect(persisted).not.toBeNull();
+    expect(persisted!.source).toBe('inline');
+    expect(persisted!.files).toEqual([
+      expect.objectContaining({ path: 'SKILL.md', content: '# Inline\n' }),
+    ]);
+
+    // Gate is consistent with the host verdict (safe → 200 + files).
+    const gate = await app.request(`/api/skills/${body.id}/files`);
+    expect(gate.status).toBe(200);
+    expect((await gate.json()).files).toEqual([{ path: 'SKILL.md', content: '# Inline\n' }]);
+  });
+
+  it('github source: fetches via fetchSkillFromGitHub and audits', async () => {
+    const slug = `${PREFIX}gh-source`;
+    const raw: RawSkill = {
+      slug,
+      name: 'GH Source Skill',
+      source: 'github',
+      sourceRef: 'o/r',
+      files: [{ path: 'SKILL.md', content: '# GH\n' }],
+    };
+    const audited: AuditedSkill = { slug, name: 'GH Source Skill', risk: 'safe', findings: [] };
+    vi.mocked(fetchSkillFromGitHub).mockResolvedValue(raw);
+    vi.mocked(auditSkill).mockResolvedValue(audited);
+
+    const res = await importReq({ source: { type: 'github', url: 'https://github.com/o/r' } });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.slug).toBe(slug);
+    expect(body.risk).toBe('safe');
+    expect(fetchSkillFromGitHub).toHaveBeenCalledWith('https://github.com/o/r');
+  });
+
+  it('400 when inline source is missing files', async () => {
+    const res = await importReq({ source: { type: 'inline', name: `${PREFIX}no-files` } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBeDefined();
+    expect(auditSkill).not.toHaveBeenCalled();
+  });
+
+  it('400 when inline source is missing name', async () => {
+    const res = await importReq({
+      source: { type: 'inline', files: [{ path: 'SKILL.md', content: '# x\n' }] },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBeDefined();
+    expect(auditSkill).not.toHaveBeenCalled();
+  });
+
+  it('400 when github source is missing url', async () => {
+    const res = await importReq({ source: { type: 'github' } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBeDefined();
+  });
 });

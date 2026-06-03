@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { Prisma } from '@prisma/client';
-import type { AuditedSkill, Finding, Risk, Severity } from '@jenz/shared';
+import type { AuditedSkill, Finding, RawSkill, Risk, Severity } from '@jenz/shared';
 import { prisma } from '../db';
 import { auditSkill } from '../lib/audit';
 import { fetchSkillFromGitHub, GitHubError } from '../lib/github';
@@ -72,10 +73,35 @@ skills.post('/import', async (c) => {
     return c.json({ error: 'invalid JSON body' }, 400);
   }
 
-  const ref = extractRef(body);
+  const source = (body && typeof body === 'object' ? (body as Record<string, unknown>).source : undefined);
+
+  // 1) {source:{type:'inline', name, files}} → build a RawSkill directly.
+  if (source && typeof source === 'object' && (source as Record<string, unknown>).type === 'inline') {
+    const s = source as Record<string, unknown>;
+    const name = typeof s.name === 'string' ? s.name.trim() : '';
+    if (!name) return c.json({ error: 'inline source requires a non-empty name' }, 400);
+    const files = parseInlineFiles(s.files);
+    if (!files) return c.json({ error: 'inline source requires a non-empty files array of {path, content}' }, 400);
+    const slug = slugify(name);
+    if (!slug) return c.json({ error: 'name does not produce a valid slug' }, 400);
+    return persistAuditRespond(c, { slug, name, source: 'inline', files });
+  }
+
+  // 2) {source:{type:'github', url}} → fetch via GitHub.
+  // 3) LEGACY top-level {ref|url|repo} string → fetch via GitHub.
+  let ref: string | null = null;
+  if (source && typeof source === 'object' && (source as Record<string, unknown>).type === 'github') {
+    const url = (source as Record<string, unknown>).url;
+    if (typeof url !== 'string' || url.trim().length === 0) {
+      return c.json({ error: 'github source requires a non-empty url string' }, 400);
+    }
+    ref = url.trim();
+  } else {
+    ref = extractRef(body);
+  }
   if (!ref) return c.json({ error: 'ref (owner/repo[/subdir] or GitHub URL) required' }, 400);
 
-  let raw;
+  let raw: RawSkill;
   try {
     raw = await fetchSkillFromGitHub(ref);
   } catch (e) {
@@ -84,6 +110,16 @@ skills.post('/import', async (c) => {
     return c.json({ error: `import failed: ${msg}` }, 400);
   }
 
+  return persistAuditRespond(c, raw);
+});
+
+/**
+ * The persist → audit → respond flow, shared by every import path.
+ * Persists the RawSkill as pending (replacing any prior row for its slug),
+ * runs the audit, writes the host-computed verdict + findings, and returns
+ * the AuditedSkill+id envelope.
+ */
+async function persistAuditRespond(c: Context, raw: RawSkill) {
   // Persist as pending first, replacing any prior row for this slug.
   const skill = await prisma.$transaction(async (tx) => {
     await tx.skill.deleteMany({ where: { slug: raw.slug } });
@@ -132,7 +168,28 @@ skills.post('/import', async (c) => {
     },
     201,
   );
-});
+}
+
+/** Validate an inline `files` value → SkillFile[] (non-empty, each {path,content} strings) or null. */
+function parseInlineFiles(value: unknown): RawSkill['files'] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const files: RawSkill['files'] = [];
+  for (const f of value) {
+    if (!f || typeof f !== 'object') return null;
+    const { path, content } = f as Record<string, unknown>;
+    if (typeof path !== 'string' || typeof content !== 'string') return null;
+    files.push({ path, content });
+  }
+  return files;
+}
+
+/** lowercase, runs of non-alphanumerics → '-', trim leading/trailing '-'. */
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
 skills.get('/:id', async (c) => {
   const skill = await prisma.skill.findUnique({
