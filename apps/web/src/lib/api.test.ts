@@ -231,9 +231,45 @@ describe("streamImport", () => {
       { type: "inline", name: "test", files: [] },
       { onProgress, onVerdict, onError },
     );
-    expect(onProgress).toHaveBeenCalledWith("scanning…");
+    expect(onProgress).toHaveBeenCalledWith(0, "scanning…");
     expect(onVerdict).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("dispatches onDiscovered for the discovered event", async () => {
+    const onDiscovered = vi.fn();
+    const onProgress = vi.fn();
+    const onVerdict = vi.fn();
+    const onError = vi.fn();
+    const skills = [
+      { index: 0, slug: "a", name: "a" },
+      { index: 1, slug: "b", name: "b" },
+    ];
+    globalThis.fetch = makeStreamFetch([
+      `event: discovered\ndata: ${JSON.stringify({ total: 2, skills })}\n\n`,
+    ]);
+    await streamImport(
+      { type: "github", url: "https://github.com/example/repo" },
+      { onDiscovered, onProgress, onVerdict, onError },
+    );
+    expect(onDiscovered).toHaveBeenCalledWith(skills);
+  });
+
+  it("carries the skill index on progress and verdict events", async () => {
+    const onProgress = vi.fn();
+    const onVerdict = vi.fn();
+    const onError = vi.fn();
+    const verdict = { id: "z", slug: "z", name: "Z", risk: "safe", findings: [], index: 1 };
+    globalThis.fetch = makeStreamFetch([
+      "event: progress\ndata: {\"index\":1,\"message\":\"scanning skill 1\"}\n\n" +
+        `event: verdict\ndata: ${JSON.stringify(verdict)}\n\n`,
+    ]);
+    await streamImport(
+      { type: "github", url: "https://github.com/example/repo" },
+      { onProgress, onVerdict, onError },
+    );
+    expect(onProgress).toHaveBeenCalledWith(1, "scanning skill 1");
+    expect(onVerdict).toHaveBeenCalledWith(verdict);
   });
 
   it("dispatches onVerdict for verdict events", async () => {
@@ -263,7 +299,7 @@ describe("streamImport", () => {
       { type: "inline", name: "test", files: [] },
       { onProgress, onVerdict, onError },
     );
-    expect(onError).toHaveBeenCalledWith("import failed");
+    expect(onError).toHaveBeenCalledWith(0, "import failed");
   });
 
   it("handles multiple frames across stream chunks", async () => {
@@ -281,8 +317,8 @@ describe("streamImport", () => {
       { onProgress, onVerdict, onError },
     );
     expect(onProgress).toHaveBeenCalledTimes(2);
-    expect(onProgress).toHaveBeenNthCalledWith(1, "p1");
-    expect(onProgress).toHaveBeenNthCalledWith(2, "p2");
+    expect(onProgress).toHaveBeenNthCalledWith(1, 0, "p1");
+    expect(onProgress).toHaveBeenNthCalledWith(2, 0, "p2");
     expect(onVerdict).toHaveBeenCalledWith(verdict);
   });
 
@@ -314,6 +350,6 @@ describe("streamImport", () => {
       { type: "inline", name: "bad", files: [] },
       { onProgress, onVerdict, onError },
     );
-    expect(onError).toHaveBeenCalledWith("bad request");
+    expect(onError).toHaveBeenCalledWith(0, "bad request");
   });
 });

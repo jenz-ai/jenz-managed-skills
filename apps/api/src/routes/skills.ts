@@ -6,7 +6,7 @@ import { Prisma } from '@prisma/client';
 import type { AuditedSkill, Finding, RawSkill, Risk, Severity } from '@jenz/shared';
 import { prisma } from '../db';
 import { auditSkill } from '../lib/audit';
-import { fetchSkillFromGitHub, GitHubError } from '../lib/github';
+import { fetchSkillsFromGitHub, GitHubError } from '../lib/github';
 import { taxonomyMapFor } from '../lib/taxonomy';
 import { getSupabaseUser } from '../lib/supabase-auth';
 import { ensureUserWorkspace } from '../lib/workspace';
@@ -124,18 +124,21 @@ skills.get('/', async (c) => {
 });
 
 /**
- * Resolve a request body to a RawSkill, or return an error + HTTP status.
+ * Resolve a request body to ONE OR MORE RawSkills, or return an error + status.
  * Shared by both `/import` (sync) and `/import/stream` (SSE) so the two paths
  * stay identical without any code duplication.
  *
  * Handles three shapes:
- *   1. {source:{type:'inline', name, files}} → build a RawSkill directly
- *   2. {source:{type:'github', url}}         → fetch from GitHub
- *   3. Legacy top-level {ref|url|repo}       → fetch from GitHub
+ *   1. {source:{type:'inline', name, files}} → one RawSkill, built directly
+ *   2. {source:{type:'github', url}}         → fetch from GitHub (N skills)
+ *   3. Legacy top-level {ref|url|repo}       → fetch from GitHub (N skills)
+ *
+ * A GitHub repo with multiple `SKILL.md` directories fans out into one RawSkill
+ * per skill; a single-skill repo (or one with no SKILL.md) yields exactly one.
  */
-async function resolveRawSkill(
+async function resolveRawSkills(
   body: unknown,
-): Promise<{ raw: RawSkill } | { error: string; status: number }> {
+): Promise<{ raws: RawSkill[] } | { error: string; status: number }> {
   const source =
     body && typeof body === 'object'
       ? (body as Record<string, unknown>).source
@@ -160,7 +163,7 @@ async function resolveRawSkill(
     const slug = slugify(name);
     if (!slug)
       return { error: 'name does not produce a valid slug', status: 400 };
-    return { raw: { slug, name, source: 'inline', files } };
+    return { raws: [{ slug, name, source: 'inline', files }] };
   }
 
   // 2) {source:{type:'github', url}} or 3) legacy top-level {ref|url|repo}
@@ -181,8 +184,8 @@ async function resolveRawSkill(
     return { error: 'ref (owner/repo[/subdir] or GitHub URL) required', status: 400 };
 
   try {
-    const raw = await fetchSkillFromGitHub(ref);
-    return { raw };
+    const raws = await fetchSkillsFromGitHub(ref);
+    return { raws };
   } catch (e) {
     if (e instanceof GitHubError) return { error: e.message, status: e.status };
     const msg = e instanceof Error ? e.message : String(e);
@@ -198,21 +201,45 @@ skills.post('/import', async (c) => {
     return c.json({ error: 'invalid JSON body' }, 400);
   }
 
-  const result = await resolveRawSkill(body);
+  const result = await resolveRawSkills(body);
   if ('error' in result) return c.json({ error: result.error }, result.status as 400);
-  return persistAuditRespond(c, result.raw, await resolveWorkspaceId(c));
+  const workspaceId = await resolveWorkspaceId(c);
+
+  // Audit every resolved skill 1-by-1. A single import (inline, or a one-skill
+  // repo) returns the bare AuditedSkill+id envelope as before; a multi-skill
+  // repo returns { skills: [...] }, so existing single-skill callers are unchanged.
+  const envelopes: (AuditedSkill & { id: string })[] = [];
+  for (const raw of result.raws) {
+    const skill = await persistPendingSkill(raw, workspaceId);
+    const audited = await auditSkill(raw);
+    // Safe skills are filed into a topical folder by the open-weight categorizer;
+    // quarantined skills get none. Soft — never blocks a verdict.
+    const folder = await resolveFolder(raw, audited, workspaceId);
+    await finalizeVerdict(skill.id, audited, folder);
+    envelopes.push({ id: skill.id, ...auditedEnvelope(audited, folder) });
+  }
+
+  return c.json(envelopes.length === 1 ? envelopes[0] : { skills: envelopes }, 201);
 });
 
 /**
  * POST /import/stream — streaming, persisting import.
  *
- * Body identical to POST /import. Validates BEFORE opening the stream so
- * invalid bodies get a plain JSON 400, not an SSE error. On success:
- *   1. Persist a `pending` row.
- *   2. Open SSE stream.
- *   3. Run audit, emitting `progress` events live.
- *   4. On success: update row with host-computed verdict, emit `verdict`.
- *   5. On throw: emit `error`, leave row as `pending` (fail closed — never safe).
+ * Body identical to POST /import. Validates (and enumerates a GitHub repo into
+ * its N skills) BEFORE opening the stream, so invalid bodies get a plain JSON
+ * 400, not an SSE error. A repo with multiple `SKILL.md` dirs fans out into N
+ * skills, audited ONE AT A TIME; every streamed event carries the skill's
+ * `index` (0-based, matching the `discovered` list) so the client can route it
+ * to the right row. Event order:
+ *   1. Open SSE stream, emit `discovered` { total, skills:[{index,slug,name}] }.
+ *   2. For each skill, in order:
+ *      a. Persist a `pending` row.
+ *      b. Run audit, emitting `progress` { index, message } live.
+ *      c. On success: write host verdict, emit `verdict` { index, id, ... }.
+ *      d. On throw: emit `error` { index }, leave row `pending` (fail closed).
+ *
+ * A single-skill import emits one `discovered` entry and exactly one verdict —
+ * the legacy shape, plus the additive `index` field.
  */
 skills.post('/import/stream', async (c) => {
   let body: unknown;
@@ -222,28 +249,11 @@ skills.post('/import/stream', async (c) => {
     return c.json({ error: 'invalid JSON body' }, 400);
   }
 
-  // Validate (and optionally fetch from GitHub) BEFORE the stream opens.
-  const result = await resolveRawSkill(body);
+  // Validate (and enumerate the GitHub repo's skills) BEFORE the stream opens.
+  const result = await resolveRawSkills(body);
   if ('error' in result) return c.json({ error: result.error }, result.status as 400);
-  const raw = result.raw;
+  const raws = result.raws;
   const workspaceId = await resolveWorkspaceId(c);
-
-  // Persist as `pending` BEFORE streaming, so the id is available in the verdict event.
-  const skill = await prisma.$transaction(async (tx) => {
-    await tx.skill.deleteMany({ where: { slug: raw.slug } });
-    return tx.skill.create({
-      data: {
-        slug: raw.slug,
-        name: raw.name,
-        source: raw.source,
-        ...(raw.sourceRef ? { sourceRef: raw.sourceRef } : {}),
-        ...(workspaceId ? { workspaceId } : {}),
-        risk: 'pending',
-        contentHash: computeContentHash(raw.files),
-        files: { create: raw.files.map((f) => ({ path: f.path, content: f.content })) },
-      },
-    });
-  });
 
   // Defeat proxy buffering — frames must arrive live.
   c.header('X-Accel-Buffering', 'no');
@@ -262,54 +272,42 @@ skills.post('/import/stream', async (c) => {
         return chain;
       };
 
-      try {
-        const audited = await auditSkill(raw, (message) => {
-          void emit('progress', { message });
-        });
+      // Announce every discovered skill up front so the UI can render all rows
+      // immediately, before any single audit completes.
+      await emit('discovered', {
+        total: raws.length,
+        skills: raws.map((r, index) => ({ index, slug: r.slug, name: r.name })),
+      });
 
-        // Safe skills get filed into a topical folder by the open-weight
-        // categorizer (quarantined skills get none). Soft — never blocks.
-        if (audited.risk === 'safe') void emit('progress', { message: 'Filing into a folder…' });
-        const folder = await resolveFolder(raw, audited, workspaceId);
-
-        // Host-computed verdict: update the row, then stream the result.
-        await prisma.skill.update({
-          where: { id: skill.id },
-          data: {
-            risk: audited.risk,
-            ...(audited.description !== undefined ? { description: audited.description } : {}),
-            ...folder,
-            findings: {
-              create: audited.findings.map((f) => ({
-                type: f.type,
-                severity: f.severity,
-                file: f.file,
-                line: f.line,
-                quote: f.quote,
-                detector: f.detector,
-              })),
-            },
-          },
-        });
-
-        await emit('verdict', {
-          id: skill.id,
-          slug: audited.slug,
-          name: audited.name,
-          risk: audited.risk,
-          findings: audited.findings,
-          ...(audited.description !== undefined ? { description: audited.description } : {}),
-          ...folder,
-          taxonomy: taxonomyMapFor(audited.findings),
-        });
-      } catch {
-        // Fail closed: a thrown audit yields an error event, never a verdict.
-        // Generic message — internals are never leaked to the client.
-        await emit('error', { error: 'audit failed' });
-      } finally {
-        // Drain the chain so nothing queued is dropped.
-        await chain;
+      // Audit each skill 1-by-1. One skill failing never aborts the rest — it
+      // emits its own `error` and the loop moves on (per-skill fail-closed).
+      for (let index = 0; index < raws.length; index++) {
+        const raw = raws[index];
+        try {
+          const skill = await persistPendingSkill(raw, workspaceId);
+          const audited = await auditSkill(raw, (message) => {
+            void emit('progress', { index, message });
+          });
+          // Safe skills get filed into a topical folder by the open-weight
+          // categorizer (quarantined skills get none). Soft — never blocks.
+          if (audited.risk === 'safe') void emit('progress', { index, message: 'Filing into a folder…' });
+          const folder = await resolveFolder(raw, audited, workspaceId);
+          await finalizeVerdict(skill.id, audited, folder);
+          await emit('verdict', {
+            index,
+            id: skill.id,
+            ...auditedEnvelope(audited, folder),
+            taxonomy: taxonomyMapFor(audited.findings),
+          });
+        } catch {
+          // Fail closed: a thrown audit (or persist) yields an error event for
+          // this skill, never a verdict. Generic message — no internals leaked.
+          await emit('error', { index, error: 'audit failed' });
+        }
       }
+
+      // Drain the chain so nothing queued is dropped.
+      await chain;
     },
     // Fallback: streamSSE surfaced an error while running the callback.
     async (_e: Error, stream: SSEStreamingApi) => {
@@ -322,14 +320,13 @@ skills.post('/import/stream', async (c) => {
 });
 
 /**
- * The persist → audit → respond flow, shared by every import path.
- * Persists the RawSkill as pending (replacing any prior row for its slug),
- * runs the audit, writes the host-computed verdict + findings, and returns
- * the AuditedSkill+id envelope.
+ * Persist a RawSkill as a `pending` row (replacing any prior row for its slug),
+ * returning the created row. Shared by every import path so a skill always
+ * exists in the DB before its audit runs — a thrown audit therefore leaves a
+ * `pending` (never `safe`) row behind: fail closed.
  */
-async function persistAuditRespond(c: Context, raw: RawSkill, workspaceId: string | null) {
-  // Persist as pending first, replacing any prior row for this slug.
-  const skill = await prisma.$transaction(async (tx) => {
+async function persistPendingSkill(raw: RawSkill, workspaceId: string | null) {
+  return prisma.$transaction(async (tx) => {
     await tx.skill.deleteMany({ where: { slug: raw.slug } });
     return tx.skill.create({
       data: {
@@ -344,14 +341,19 @@ async function persistAuditRespond(c: Context, raw: RawSkill, workspaceId: strin
       },
     });
   });
+}
 
-  // Audit, then write the host-computed verdict + findings onto the row.
-  const audited = await auditSkill(raw);
-  // Safe skills get filed into a topical folder by the open-weight categorizer;
-  // quarantined skills get none.
-  const folder = await resolveFolder(raw, audited, workspaceId);
+/**
+ * Write the host-computed verdict + findings (and the resolved topic folder)
+ * onto a previously-pending row. `folder` is `{}` for quarantined skills.
+ */
+async function finalizeVerdict(
+  skillId: string,
+  audited: AuditedSkill,
+  folder: { category: string } | Record<string, never>,
+) {
   await prisma.skill.update({
-    where: { id: skill.id },
+    where: { id: skillId },
     data: {
       risk: audited.risk,
       ...(audited.description !== undefined ? { description: audited.description } : {}),
@@ -368,19 +370,21 @@ async function persistAuditRespond(c: Context, raw: RawSkill, workspaceId: strin
       },
     },
   });
+}
 
-  return c.json(
-    {
-      id: skill.id,
-      slug: raw.slug,
-      name: raw.name,
-      risk: audited.risk,
-      findings: audited.findings,
-      ...(audited.description !== undefined ? { description: audited.description } : {}),
-      ...folder,
-    },
-    201,
-  );
+/** The AuditedSkill response envelope (sans id), shared by the import responses. */
+function auditedEnvelope(
+  audited: AuditedSkill,
+  folder: { category: string } | Record<string, never>,
+): AuditedSkill {
+  return {
+    slug: audited.slug,
+    name: audited.name,
+    risk: audited.risk,
+    findings: audited.findings,
+    ...(audited.description !== undefined ? { description: audited.description } : {}),
+    ...folder,
+  };
 }
 
 /**

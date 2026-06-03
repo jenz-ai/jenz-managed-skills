@@ -41,6 +41,8 @@ const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
 
 const MAX_FILE_BYTES = 100 * 1024;
 const MAX_FILES = 50;
+/** Cap on how many distinct skills one repo import can fan out into. */
+const MAX_SKILLS = 50;
 
 /**
  * Parse a GitHub reference into `{ owner, repo, subdir }`.
@@ -194,11 +196,166 @@ export async function fetchSkillFromGitHub(
   }
 
   // 5. Assemble the RawSkill identity.
+  return { ...subdirIdentity(owner, repo, subdir), files, source: 'github' };
+}
+
+/**
+ * Identity ({slug, name, sourceRef}) for a skill whose root IS `subdir` (or the
+ * repo root when `subdir` is empty). This is the single-skill identity the
+ * import has always produced; `fetchSkillsFromGitHub` reuses it for the "the
+ * subdir itself is the skill" case so behaviour matches `fetchSkillFromGitHub`.
+ */
+function subdirIdentity(
+  owner: string,
+  repo: string,
+  subdir: string,
+): { slug: string; name: string; sourceRef: string } {
   const slug = subdir
     ? `${slugify(`${owner}-${repo}`)}-${slugify(subdir)}`
     : slugify(`${owner}-${repo}`);
   const name = subdir ? `${repo}/${subdir}` : repo;
   const sourceRef = subdir ? `${owner}/${repo}/${subdir}` : `${owner}/${repo}`;
+  return { slug, name, sourceRef };
+}
 
-  return { slug, name, files, source: 'github', sourceRef };
+/** Resolve the default branch and recursive git tree for a repo (steps 1+2). */
+async function resolveRepoTree(
+  owner: string,
+  repo: string,
+  doFetch: FetchLike,
+): Promise<{ branch: string; tree: TreeEntry[] }> {
+  const repoRes = await doFetch(`https://api.github.com/repos/${owner}/${repo}`, {
+    headers: { ...GITHUB_HEADERS },
+  });
+  if (repoRes.status === 404) throw new GitHubError('repo not found', 404);
+  if (!repoRes.ok) throw new GitHubError(`GitHub repo fetch failed (${repoRes.status})`, 502);
+  const repoData = (await repoRes.json()) as { default_branch?: string };
+  const branch = repoData.default_branch || 'main';
+
+  const treeRes = await doFetch(
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+    { headers: { ...GITHUB_HEADERS } },
+  );
+  if (!treeRes.ok) throw new GitHubError(`GitHub repo fetch failed (${treeRes.status})`, 502);
+  const treeData = (await treeRes.json()) as { tree?: TreeEntry[] };
+  return { branch, tree: Array.isArray(treeData.tree) ? treeData.tree : [] };
+}
+
+/** Read one file's raw bytes; returns null (skip) on any non-ok response. */
+async function readRawFile(
+  owner: string,
+  repo: string,
+  branch: string,
+  path: string,
+  doFetch: FetchLike,
+): Promise<string | null> {
+  const rawRes = await doFetch(
+    `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`,
+    { headers: { ...RAW_HEADERS } },
+  );
+  if (!rawRes.ok) return null;
+  return rawRes.text();
+}
+
+/**
+ * Fetch a public GitHub repo and split it into ONE `RawSkill` per skill — where
+ * a "skill" is a directory containing a `SKILL.md` (case-insensitive). Each
+ * skill's files are made relative to its own directory (so `SKILL.md` sits at
+ * the skill root), mirroring the web's `buildInlineSources`.
+ *
+ * Scoping & fallback:
+ * - Only files under `subdir` (when the ref carries one) are considered.
+ * - When NO `SKILL.md` exists under the scope, falls back to a single
+ *   whole-scope skill — identical to `fetchSkillFromGitHub` — so bare-file
+ *   repos and single-skill subdir URLs keep importing as exactly one skill.
+ *
+ * Throws `GitHubError` on any hard failure so the caller fails closed.
+ */
+export async function fetchSkillsFromGitHub(
+  input: string,
+  deps?: { fetch?: FetchLike },
+): Promise<RawSkill[]> {
+  const doFetch = deps?.fetch ?? (globalThis.fetch as unknown as FetchLike);
+  const { owner, repo, subdir } = parseGitHubRef(input);
+  const { branch, tree } = await resolveRepoTree(owner, repo, doFetch);
+
+  // Candidate text blobs under the scope (same filter as the single-skill path).
+  const prefix = subdir ? `${subdir}/` : '';
+  const candidates = tree
+    .filter(
+      (entry) =>
+        entry.type === 'blob' &&
+        typeof entry.path === 'string' &&
+        entry.path.startsWith(prefix) &&
+        (entry.size ?? 0) <= MAX_FILE_BYTES &&
+        !BINARY_EXTENSIONS.has(extensionOf(entry.path)),
+    )
+    .map((entry) => entry.path);
+
+  if (candidates.length === 0) throw new GitHubError('no skill files found', 422);
+
+  // Skill dirs = the parent directory of every SKILL.md ('' = repo root).
+  const skillDirs = new Set<string>();
+  for (const path of candidates) {
+    if (/(^|\/)SKILL\.md$/i.test(path)) {
+      skillDirs.add(path.split('/').slice(0, -1).join('/'));
+    }
+  }
+
+  // Fallback: no SKILL.md under the scope → one whole-scope skill (legacy shape).
+  if (skillDirs.size === 0) {
+    const files: SkillFile[] = [];
+    for (const path of candidates.slice(0, MAX_FILES)) {
+      const content = await readRawFile(owner, repo, branch, path, doFetch);
+      if (content === null) continue;
+      files.push({ path: path.slice(prefix.length), content });
+    }
+    if (files.length === 0) {
+      throw new GitHubError('failed to read any skill file content', 502);
+    }
+    return [{ ...subdirIdentity(owner, repo, subdir), files, source: 'github' }];
+  }
+
+  // Assign each candidate file to the DEEPEST skill dir it lives under.
+  const dirFiles = new Map<string, string[]>();
+  for (const dir of skillDirs) dirFiles.set(dir, []);
+  for (const path of candidates) {
+    const segs = path.split('/');
+    for (let i = segs.length - 1; i >= 0; i--) {
+      const candidate = segs.slice(0, i).join('/');
+      if (skillDirs.has(candidate)) {
+        dirFiles.get(candidate)!.push(path);
+        break;
+      }
+    }
+  }
+
+  // One RawSkill per skill dir (sorted for stable order, capped at MAX_SKILLS).
+  const skills: RawSkill[] = [];
+  for (const dir of [...skillDirs].sort().slice(0, MAX_SKILLS)) {
+    const files: SkillFile[] = [];
+    for (const path of (dirFiles.get(dir) ?? []).slice(0, MAX_FILES)) {
+      const content = await readRawFile(owner, repo, branch, path, doFetch);
+      if (content === null) continue;
+      files.push({ path: dir ? path.slice(dir.length + 1) : path, content });
+    }
+    if (files.length === 0) continue;
+
+    // The subdir itself being the skill reuses the legacy single-skill identity;
+    // a nested skill dir derives identity from its full repo-relative path.
+    const identity =
+      dir === subdir
+        ? subdirIdentity(owner, repo, subdir)
+        : {
+            slug: slugify(`${owner}-${repo}-${dir}`),
+            name: dir.split('/').pop() as string,
+            sourceRef: `${owner}/${repo}/${dir}`,
+          };
+    skills.push({ ...identity, files, source: 'github' });
+  }
+
+  if (skills.length === 0) {
+    throw new GitHubError('failed to read any skill file content', 502);
+  }
+  return skills;
 }
