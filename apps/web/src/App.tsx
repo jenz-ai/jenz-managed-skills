@@ -135,12 +135,6 @@ export default function App() {
   if (screen === "onboarding") {
     return (
       <div className="js-win">
-        <div className="js-titlebar">
-          <div className="js-title">
-            <span className="js-logo"><SIcon name="shield-check" size={12} /></span>
-            jenz managed skills <span className="js-title-sub">· setup</span>
-          </div>
-        </div>
         <div className="js-shell" style={{ gridTemplateColumns: "1fr" }}>
           <div className="js-main">
             <ScreenSlot kind="onboarding" props={{ onImport: startImport }} />
@@ -155,7 +149,7 @@ export default function App() {
       <div className="js-titlebar">
         <div className="js-title">
           <span className="js-logo"><SIcon name="shield-check" size={12} /></span>
-          jenz managed skills <span className="js-title-sub">· Bicone</span>
+          jenz managed skills <span className="js-title-sub">· Acme</span>
         </div>
         <div className="js-titlebar-end"><SIcon name="shield-check" size={13} /> auditor online</div>
       </div>

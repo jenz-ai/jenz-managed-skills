@@ -217,9 +217,9 @@ export function Sidebar(props: SidebarProps) {
           </div>
         )}
         <button className={"js-ws" + (popOpen ? " open" : "")} onClick={() => setPopOpen((o) => !o)}>
-          <span className="js-ws-avatar">B</span>
+          <span className="js-ws-avatar">A</span>
           <span className="js-ws-name">
-            Bicone<span className="sub">{skills.length} skills · audited</span>
+            Acme<span className="sub">{skills.length} skills · audited</span>
           </span>
           <SIcon name="chev-up" size={14} />
         </button>

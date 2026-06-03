@@ -9,11 +9,8 @@ import {
 } from "./onboardingLogic";
 
 describe("onboardingSteps", () => {
-  it("inline placement omits the mcp step", () => {
-    expect(onboardingSteps("inline")).toEqual(["name", "import", "review"]);
-  });
-  it("step placement inserts mcp between import and review", () => {
-    expect(onboardingSteps("step")).toEqual(["name", "import", "mcp", "review"]);
+  it("returns welcome, name, import, mcp, review in order", () => {
+    expect(onboardingSteps()).toEqual(["welcome", "name", "import", "mcp", "review"]);
   });
 });
 

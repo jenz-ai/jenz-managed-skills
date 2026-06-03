@@ -3,8 +3,7 @@
 // SKILL.md scan / skill-name derivation, the GitHub repo-label parse, and the
 // staged `total` count are unit-testable without rendering React.
 
-export type StepId = "name" | "import" | "mcp" | "review";
-export type McpPlacement = "inline" | "step";
+export type StepId = "welcome" | "name" | "import" | "mcp" | "review";
 
 export interface StagedSkill {
   id: string;
@@ -19,12 +18,9 @@ export interface StagedGroup {
   agent?: string;
 }
 
-// Steps depend only on where MCP lives: its own step, or inline in import.
-// (skills-onboarding.jsx line 18.)
-export function onboardingSteps(mcpPlacement: McpPlacement): StepId[] {
-  return mcpPlacement === "step"
-    ? ["name", "import", "mcp", "review"]
-    : ["name", "import", "review"];
+// MCP is always its own step; the wizard opens with a Welcome step.
+export function onboardingSteps(): StepId[] {
+  return ["welcome", "name", "import", "mcp", "review"];
 }
 
 // Sum of staged skills across all sources — drives the review/CTA copy.

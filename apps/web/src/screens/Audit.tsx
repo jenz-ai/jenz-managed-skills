@@ -69,15 +69,18 @@ function Audit({ onDone, onOpenSkill, runKey }: AuditProps) {
   const [statuses, setStatuses] = useState<RowStatus[]>(() => order.map(() => "queued"));
   const [scanning, setScanning] = useState(0); // index scanning, or >=total when done
   const [label, setLabel] = useState(SCAN_LABELS[0]);
+  const [started, setStarted] = useState(false); // gate: audit only runs after "Run audit"
 
   // reset when re-run
   useEffect(() => {
     setStatuses(order.map(() => "queued"));
     setScanning(0);
+    setStarted(false);
   }, [runKey, order]);
 
   // drive the scan of the current row
   useEffect(() => {
+    if (!started) return;
     if (scanning >= total) return;
     setStatuses((prev) => {
       const next = prev.slice();
@@ -104,7 +107,7 @@ function Audit({ onDone, onOpenSkill, runKey }: AuditProps) {
       clearInterval(labelTimer);
       clearTimeout(resolveTimer);
     };
-  }, [scanning, total, order]);
+  }, [started, scanning, total, order]);
 
   const resolved = resolvedCount(statuses);
   const done = scanning >= total;
@@ -117,20 +120,30 @@ function Audit({ onDone, onOpenSkill, runKey }: AuditProps) {
       <div className="jsa-orch">
         <div className="jsa-orch-top">
           <div className="jsa-orch-ico">
-            <SIcon name={done ? "shield-check" : "scan"} size={20} />
+            <SIcon name={!started ? "scan" : done ? "shield-check" : "scan"} size={20} />
           </div>
           <div className="jsa-orch-body">
-            <div className="jsa-orch-title">{done ? "Audit complete" : "Auditing imported skills"}</div>
+            <div className="jsa-orch-title">
+              {!started ? "Ready to audit" : done ? "Audit complete" : "Auditing imported skills"}
+            </div>
             <div className="jsa-orch-sub">
-              {done
+              {!started
+                ? <>{total} skills imported · open-weight auditor runs locally</>
+                : done
                 ? <>open-weight auditor · {total} skills · {threats} flagged</>
                 : <>open-weight auditor running locally · <span className="live">{label}</span></>}
             </div>
           </div>
-          <div className="jsa-counter">
-            <b>{resolved}</b> / {total}
-            <div style={{ fontSize: "10.5px", color: "var(--fg-3)", marginTop: "2px", textTransform: "uppercase", letterSpacing: "0.08em" }}>audited</div>
-          </div>
+          {!started ? (
+            <button className="jh-cta" onClick={() => setStarted(true)}>
+              <SIcon name="scan" size={14} /> Run audit
+            </button>
+          ) : (
+            <div className="jsa-counter">
+              <b>{resolved}</b> / {total}
+              <div style={{ fontSize: "10.5px", color: "var(--fg-3)", marginTop: "2px", textTransform: "uppercase", letterSpacing: "0.08em" }}>audited</div>
+            </div>
+          )}
         </div>
         <div className="jsa-bar"><div className="jsa-bar-fill" style={{ width: pct + "%" }} /></div>
         <div className="jsa-bar-stats">

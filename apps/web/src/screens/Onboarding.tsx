@@ -1,33 +1,28 @@
-// Onboarding wizard (SPEC §6) — the app's first-paint entry. Jenz runs in the
-// browser and can't reach the user's machine, so skills are either uploaded
-// (folder picker scanning for SKILL.md), pulled from a GitHub repo, or pushed
-// in by a CLI agent over MCP. Steps: name → import → (mcp if placement=step) →
-// review → audit. Ported node-for-node from skills-onboarding.jsx.
+// Onboarding wizard (SPEC §6) — the app's first-paint entry, rebuilt to match
+// the in-house jenz-brain desktop onboarding (the `ob-*` shell). Jenz runs in
+// the browser and can't reach the user's machine, so skills are either uploaded
+// (folder picker scanning for SKILL.md), pulled from a GitHub repo, or pushed in
+// by a CLI agent over MCP. Steps: welcome → name → import → mcp → review.
 //
-// App.tsx passes only { onImport: startImport }; importLayout/mcpPlacement use
-// their defaults ("per-tool"/"inline"). onImport(total) jumps to the audit.
-//
-// The pure branching (steps array), the SKILL.md folder scan, the GitHub
+// App.tsx passes only { onImport: startImport }. onImport(total) jumps to the
+// audit. The pure branching (steps array), the SKILL.md folder scan, the GitHub
 // repo-label parse, and the staged `total` count live in onboardingLogic.ts and
 // are unit-tested in onboardingLogic.test.ts.
-import { useRef, useState, type ComponentType } from "react";
+import { useRef, useState, type ComponentType, type ReactNode } from "react";
 import { registerScreen } from "../shell/ScreenSlot";
-import { SIcon } from "../components/SIcon";
-import { SourceBadge } from "../components/SourceBadge";
+import { SIcon, type IconName } from "../components/SIcon";
 import { McpConnect } from "../components/McpConnect";
 import {
   onboardingSteps,
   parseRepoLabel,
   scanSkillDirs,
   totalSkills,
-  type McpPlacement,
   type StagedGroup,
+  type StepId,
 } from "./onboardingLogic";
 
 interface OnboardingProps {
   onImport: (total: number) => void;
-  importLayout?: "per-tool" | "drop";
-  mcpPlacement?: McpPlacement;
 }
 
 const TOOLS = [
@@ -44,26 +39,78 @@ const SKILL_POOL = [
   "tone-check",
 ];
 
-function Onboarding({
-  onImport,
-  importLayout = "per-tool",
-  mcpPlacement = "inline",
-}: OnboardingProps) {
-  const [name, setName] = useState("Bicone");
+// Stepper labels, in step order — Welcome · Workspace · Skills · Agent · Review.
+const STEP_LABELS: Record<StepId, string> = {
+  welcome: "Welcome",
+  name: "Workspace",
+  import: "Skills",
+  mcp: "Agent",
+  review: "Review",
+};
+
+// Hoisted to module scope so their identity is stable across renders. Defining
+// these INSIDE Onboarding made React remount the whole card subtree on every
+// keystroke (the input lost focus and the page flickered).
+interface ShellNav {
+  steps: StepId[];
+  stepIdx: number;
+  setStepIdx: (i: number) => void;
+}
+
+function Stepper({ steps, stepIdx, setStepIdx }: ShellNav) {
+  return (
+    <div className="ob-stepper">
+      {steps.map((s, i) => {
+        const done = stepIdx > i;
+        const active = stepIdx === i;
+        return (
+          <div className="ob-step-wrap" key={s}>
+            <button
+              className={"ob-step" + (active ? " active" : "") + (done ? " done" : "")}
+              onClick={() => done && setStepIdx(i)}
+              disabled={!done && !active}
+            >
+              <span className="ob-step-num">{done ? "✓" : i + 1}</span>
+              <span className="ob-step-lbl">{STEP_LABELS[s]}</span>
+            </button>
+            {i < steps.length - 1 && <span className={"ob-step-line" + (done ? " done" : "")} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Shell({ children, ...nav }: ShellNav & { children: ReactNode }) {
+  return (
+    <div className="ob-overlay">
+      <div className="ob-wrap">
+        <header className="ob-header">
+          <Stepper {...nav} />
+        </header>
+        <main className="ob-body">
+          <div className="ob-card">{children}</div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function Onboarding({ onImport }: OnboardingProps) {
+  const [name, setName] = useState("");
   const [groups, setGroups] = useState<StagedGroup[]>([]);
   const [repoUrl, setRepoUrl] = useState("");
   const [mcp, setMcp] = useState<{ connected: boolean; agent: string | null }>({
     connected: false,
     agent: null,
   });
-  const [routeThrough, setRouteThrough] = useState(true);
   const [stepIdx, setStepIdx] = useState(0);
 
   const folderRef = useRef<HTMLInputElement | null>(null);
   const pendingRef = useRef<{ label: string | null; sub: string } | null>(null);
   const gidRef = useRef(0);
 
-  const steps = onboardingSteps(mcpPlacement);
+  const steps = onboardingSteps();
   const stepId = steps[Math.min(stepIdx, steps.length - 1)];
   const next = () => setStepIdx((i) => Math.min(i + 1, steps.length - 1));
   const back = () => setStepIdx((i) => Math.max(i - 1, 0));
@@ -141,24 +188,24 @@ function Onboarding({
   const StagedList = ({ removableSkills }: { removableSkills?: boolean }) => {
     if (!groups.length) return null;
     return (
-      <div className="jso-staged">
+      <div className="ob-staged">
         {groups.map((g) => (
-          <div className="jso-grp" key={g.id}>
-            <div className="jso-grp-head">
-              <span className="jg-ico">
+          <div className="ob-grp" key={g.id}>
+            <div className="ob-grp-head">
+              <span className="ob-grp-ico">
                 <SIcon name={g.kind === "github" ? "git" : g.kind === "mcp" ? "terminal" : "folder"} size={14} />
               </span>
-              <span className="jg-label">{g.label}</span>
-              <span className="jg-sub">{g.sub}</span>
-              <span className="jg-count">{g.skills.length}</span>
-              <button className="jg-x" title="Remove source" onClick={() => removeGroup(g.id)}><SIcon name="x" size={13} /></button>
+              <span className="ob-grp-label">{g.label}</span>
+              <span className="ob-grp-sub">{g.sub}</span>
+              <span className="ob-grp-count">{g.skills.length}</span>
+              <button className="ob-grp-x" title="Remove source" onClick={() => removeGroup(g.id)}><SIcon name="x" size={13} /></button>
             </div>
             {removableSkills && (
-              <div className="jso-grp-skills">
+              <div className="ob-grp-skills">
                 {g.skills.map((s) => (
-                  <span className="jso-skchip" key={s.id}>
+                  <span className="ob-skchip" key={s.id}>
                     <SIcon name="skills" size={11} /> {s.name}
-                    <button className="sk-x" title="Remove" onClick={() => removeSkill(g.id, s.id)}><SIcon name="x" size={11} /></button>
+                    <button className="ob-skchip-x" title="Remove" onClick={() => removeSkill(g.id, s.id)}><SIcon name="x" size={11} /></button>
                   </span>
                 ))}
               </div>
@@ -169,192 +216,243 @@ function Onboarding({
     );
   };
 
-  const RouteToggle = () => (
-    <div className="jso-route">
-      <div className="jr-body">
-        <div className="jr-title">Route new skills through Jenz</div>
-        <div className="jr-sub">When a connected agent installs a new skill, Jenz audits it first — verified skills land in the agent’s folder automatically, risky ones stay quarantined here.</div>
-      </div>
-      <button className={"jso-switch" + (routeThrough ? " on" : "")} role="switch" aria-checked={routeThrough} onClick={() => setRouteThrough((r) => !r)}><i /></button>
-    </div>
-  );
+  const nav: ShellNav = { steps, stepIdx, setStepIdx };
 
-  const stepNo = stepIdx + 1;
+  // ===== STEP: welcome =====
+  if (stepId === "welcome") {
+    return (
+      <Shell {...nav}>
+        <div className="ob-eyebrow">Welcome to jenz managed skills</div>
+        <h1 className="ob-title">Every skill, audited before it runs.</h1>
+        <p className="ob-blurb">
+          Jenz is the managed home for your agents' skills. Upload them or let an agent push them in —
+          every one is scanned for prompt injection and malicious code <em>before</em> it can reach your agent.
+        </p>
 
-  return (
-    <div className="jso">
-      <div className="jso-inner">
-        <div className="jso-mark"><SIcon name="shield-check" size={24} /></div>
+        <div className="ob-hero">{HERO}</div>
 
-        <div className="jso-stepper">
-          <div className="jso-progress"><div className="jso-progress-fill" style={{ width: ((stepIdx + 1) / steps.length) * 100 + "%" }} /></div>
-          <span className="jso-step-label">Step {stepNo} of {steps.length}</span>
+        <div className="ob-pillars">
+          {([
+            { icon: "shield-check", h: "Audited before they run", b: "Every skill is scanned the moment it arrives. Nothing reaches your agent unvetted." },
+            { icon: "shield-alert", h: "Prompt injection, caught", b: "Open-weight detectors flag hidden instructions, exfiltration, and unsafe tool calls — as evidence, not vibes." },
+            { icon: "terminal", h: "Agent-pushed, auto-routed", b: "Connect a CLI agent and new skills route through Jenz automatically — clean ones land, risky ones stay quarantined." },
+          ] as { icon: IconName; h: string; b: string }[]).map((p) => (
+            <div className="ob-pillar" key={p.h}>
+              <div className="ob-pillar-glyph"><SIcon name={p.icon} size={16} /></div>
+              <div>
+                <div className="ob-pillar-h">{p.h}</div>
+                <div className="ob-pillar-b">{p.b}</div>
+              </div>
+            </div>
+          ))}
         </div>
 
-        {/* STEP — name */}
-        {stepId === "name" && (
-          <>
-            <h1>Bring your skills somewhere safe.</h1>
-            <p className="jso-sub">
-              Jenz is the managed home for your agents’ skills. Upload them or let an agent push them in over MCP —
-              every one gets audited for prompt injection and malicious code <em>before</em> it can run.
-            </p>
-            <div className="jso-field-label">Workspace name</div>
-            <input className="jso-input" value={name} autoFocus spellCheck={false} placeholder="e.g. Bicone"
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) next(); }} />
-            <div className="jso-cta-row">
-              <button className="jso-cta" disabled={!name.trim()} onClick={next}>Continue <SIcon name="arrow-right" size={15} /></button>
-              <span className="jso-cta-note">you can rename this anytime</span>
+        <div className="ob-foot">
+          <span className="ob-foot-hint">~1 minute · you can change anything later</span>
+          <span className="ob-foot-spacer" />
+          <button className="btn-primary" onClick={next}>Get started →</button>
+        </div>
+      </Shell>
+    );
+  }
+
+  // ===== STEP: name =====
+  if (stepId === "name") {
+    return (
+      <Shell {...nav}>
+        <div className="ob-eyebrow">Step 1 · Workspace</div>
+        <h1 className="ob-title">Name your workspace.</h1>
+        <p className="ob-blurb">Where your audited skills live. You can rename it anytime.</p>
+
+        <input
+          className="ob-input"
+          value={name}
+          autoFocus
+          spellCheck={false}
+          placeholder="e.g. Acme"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) next(); }}
+        />
+
+        <div className="ob-foot">
+          <button className="btn-secondary" onClick={back}>← Back</button>
+          <span className="ob-foot-spacer" />
+          <button className="btn-primary" disabled={!name.trim()} onClick={next}>Continue →</button>
+        </div>
+      </Shell>
+    );
+  }
+
+  // ===== STEP: import =====
+  if (stepId === "import") {
+    return (
+      <Shell {...nav}>
+        <div className="ob-eyebrow">Step 2 · Add skills</div>
+        <h1 className="ob-title">Add your skills.</h1>
+        <p className="ob-blurb">
+          Jenz runs in your browser, so it can't reach your machine — upload a skills folder or pull a GitHub repo.
+        </p>
+
+        <div className="ob-choice-grid">
+          <button className="ob-region ob-choice" onClick={() => openFolder(null, "folder")}>
+            <span className="ob-choice-glyph"><SIcon name="folder" size={18} /></span>
+            <div className="ob-choice-name">Upload a folder</div>
+            <div className="ob-choice-hint">~/.claude/skills · ~/.codex/skills · ~/.openclaw/skills · ~/.hermes/skills</div>
+          </button>
+
+          <div className="ob-region ob-choice ob-choice-gh">
+            <span className="ob-choice-glyph"><SIcon name="git" size={18} /></span>
+            <div className="ob-choice-name">From GitHub</div>
+            <div className="ob-gh-row">
+              <input
+                className="ob-input ob-gh-input"
+                value={repoUrl}
+                placeholder="github.com/org/skills"
+                spellCheck={false}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addRepo(); }}
+              />
+              <button className="ob-gh-add" onClick={addRepo} disabled={!repoUrl.trim()}>Add</button>
             </div>
-          </>
+          </div>
+        </div>
+
+        <input
+          ref={(el) => { folderRef.current = el; if (el) { el.setAttribute("webkitdirectory", ""); el.setAttribute("directory", ""); } }}
+          type="file" multiple style={{ display: "none" }} onChange={onFolder}
+        />
+
+        <StagedList />
+
+        <div className="ob-foot">
+          <button className="btn-secondary" onClick={back}>← Back</button>
+          <span className="ob-foot-spacer" />
+          <span className="ob-foot-hint">{total > 0 ? `${total} skill${total > 1 ? "s" : ""} staged` : "or connect with MCP"}</span>
+          <button className="btn-primary" onClick={next}>Continue →</button>
+        </div>
+      </Shell>
+    );
+  }
+
+  // ===== STEP: mcp =====
+  if (stepId === "mcp") {
+    return (
+      <Shell {...nav}>
+        <div className="ob-eyebrow">Step 3 · Connect agent</div>
+        <h1 className="ob-title">Connect your coding agent.</h1>
+        <p className="ob-blurb">
+          Connect Jenz to your coding agent so it pushes new skills through Jenz to be audited the moment
+          they're added — nothing reaches the agent unvetted. You can do this later.
+        </p>
+
+        <McpConnect workspace={name} connected={mcp.connected} connectedAgent={mcp.agent} onConnect={onMcpConnect} />
+
+        <StagedList />
+
+        <div className="ob-foot">
+          <button className="btn-secondary" onClick={back}>← Back</button>
+          <span className="ob-foot-spacer" />
+          <button className="ob-link" onClick={next}>Skip for now</button>
+          <button className="btn-primary" onClick={next}>Continue →</button>
+        </div>
+      </Shell>
+    );
+  }
+
+  // ===== STEP: review =====
+  return (
+    <Shell {...nav}>
+      <div className="ob-eyebrow">Step 4 · Review</div>
+      <h1 className="ob-title">{total > 0 ? "Review your skills." : "Nothing staged yet."}</h1>
+      <p className="ob-blurb">
+        {total > 0 ? (
+          <>These are the skills headed into <b>{name || "your workspace"}</b>. Drop anything you don't want, then enter your workspace.</>
+        ) : (
+          <>You can finish now and add skills later — uploads or a connected agent pushing them through Jenz.</>
         )}
+      </p>
 
-        {/* STEP — import */}
-        {stepId === "import" && (
-          <>
-            <h1>Add your skills.</h1>
-            <p className="jso-sub">
-              Jenz runs in your browser, so it can’t reach your machine — pick each tool’s skills folder to upload it,
-              pull a GitHub repo, or connect an agent over MCP to push them in automatically.
-            </p>
-
-            {importLayout === "per-tool" ? (
+      {total > 0 ? (
+        <>
+          <div className="ob-review-bar">
+            <span><b>{total}</b> skill{total > 1 ? "s" : ""}</span>
+            <span className="ob-review-sep">·</span>
+            <span>{groups.length} source{groups.length > 1 ? "s" : ""}</span>
+            {mcp.connected && (
               <>
-                <div className="jso-field-label">Upload from your tools</div>
-                <div className="jso-tool-grid">
-                  {TOOLS.map((t) => (
-                    <div className="jso-tool" key={t.id}>
-                      <SourceBadge kind={t.id} />
-                      <div className="jt-body">
-                        <div className="jt-name">{t.name}</div>
-                        <div className="jt-path">{t.path}</div>
-                      </div>
-                      <button className="jt-btn" onClick={() => openFolder(t.name, t.path)}>
-                        <SIcon name="folder" size={13} /> Choose folder
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <div className="jso-field-label" style={{ marginTop: 22 }}>Other sources</div>
-                <div className="jso-byo-grid">
-                  <button className="jso-byo-tile" onClick={() => openFolder(null, "folder")}>
-                    <span className="byo-ico"><SIcon name="import" size={17} /></span>
-                    <div className="byo-body"><div className="byo-name">Upload any folder</div><div className="byo-meta">a SKILL.md tree or .zip</div></div>
-                    <span className="byo-plus"><SIcon name="plus" size={14} /></span>
-                  </button>
-                  <div className="jso-byo-tile gh">
-                    <span className="byo-ico"><SIcon name="git" size={17} /></span>
-                    <input className="jso-gh-input" value={repoUrl} placeholder="github.com/org/skills" spellCheck={false}
-                      onChange={(e) => setRepoUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addRepo(); }} />
-                    <button className="jso-gh-add" onClick={addRepo} disabled={!repoUrl.trim()}>Add</button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <button className="jso-drop" onClick={() => openFolder(null, "folder")}>
-                  <span className="jd-ico"><SIcon name="import" size={22} /></span>
-                  <div className="jd-body">
-                    <div className="jd-title">Upload a skills folder</div>
-                    <div className="jd-meta">Pick the whole directory — e.g. <code>~/.claude/skills</code>, <code>~/.codex/skills</code></div>
-                  </div>
-                  <span className="jd-cta">Choose folder</span>
-                </button>
-                <div className="jso-byo-grid" style={{ gridTemplateColumns: "1fr", marginTop: 12 }}>
-                  <div className="jso-byo-tile gh">
-                    <span className="byo-ico"><SIcon name="git" size={17} /></span>
-                    <input className="jso-gh-input" value={repoUrl} placeholder="github.com/org/skills" spellCheck={false}
-                      onChange={(e) => setRepoUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addRepo(); }} />
-                    <button className="jso-gh-add" onClick={addRepo} disabled={!repoUrl.trim()}>Add</button>
-                  </div>
-                </div>
+                <span className="ob-review-sep">·</span>
+                <span className="ob-review-route"><SIcon name="shield-check" size={12} /> agent connected</span>
               </>
             )}
+          </div>
+          <StagedList removableSkills />
+        </>
+      ) : (
+        <div className="ob-empty">
+          <span className="ob-empty-ico"><SIcon name="shield-check" size={24} /></span>
+          <div>Your managed library starts empty. Connect an agent over MCP and it'll push verified skills in as you go.</div>
+        </div>
+      )}
 
-            <input ref={(el) => { folderRef.current = el; if (el) { el.setAttribute("webkitdirectory", ""); el.setAttribute("directory", ""); } }}
-              type="file" multiple style={{ display: "none" }} onChange={onFolder} />
-
-            {mcpPlacement === "inline" && (
-              <div style={{ marginTop: 22 }}>
-                <div className="jso-field-label">Or connect an agent</div>
-                <McpConnect workspace={name} connected={mcp.connected} connectedAgent={mcp.agent} onConnect={onMcpConnect} />
-                <div style={{ marginTop: 12 }}><RouteToggle /></div>
-              </div>
-            )}
-
-            <StagedList />
-
-            <div className="jso-cta-row">
-              <button className="jso-back" onClick={back}><SIcon name="arrow-left" size={14} /> Back</button>
-              <button className="jso-cta" onClick={next}>
-                {total > 0 ? "Review" : "Continue"} <SIcon name="arrow-right" size={15} />
-              </button>
-              <span className="jso-cta-note">{total > 0 ? `${total} skill${total > 1 ? "s" : ""} staged` : "or connect via CLI and add later"}</span>
-            </div>
-          </>
-        )}
-
-        {/* STEP — mcp (only when placement = step) */}
-        {stepId === "mcp" && (
-          <>
-            <h1>Connect your CLI agent.</h1>
-            <p className="jso-sub">
-              The fastest path: your agent has filesystem access, so it can push its skills into Jenz directly and
-              route new ones through the audit before they ever land in its folder.
-            </p>
-            <McpConnect workspace={name} connected={mcp.connected} connectedAgent={mcp.agent} onConnect={onMcpConnect} />
-            <div style={{ marginTop: 14 }}><RouteToggle /></div>
-            <StagedList />
-            <div className="jso-cta-row">
-              <button className="jso-back" onClick={back}><SIcon name="arrow-left" size={14} /> Back</button>
-              <button className="jso-cta" onClick={next}>Review <SIcon name="arrow-right" size={15} /></button>
-              <span className="jso-cta-note">{mcp.connected ? "agent connected" : "you can skip and connect later"}</span>
-            </div>
-          </>
-        )}
-
-        {/* STEP — review */}
-        {stepId === "review" && (
-          <>
-            <h1>{total > 0 ? "Review before the audit." : "Nothing staged yet."}</h1>
-            <p className="jso-sub">
-              {total > 0
-                ? <>These are the skills headed into <b>{name || "your workspace"}</b>. Drop anything you don’t want, then run the audit.</>
-                : <>You can finish now and add skills later — uploads or a connected agent pushing them through Jenz.</>}
-            </p>
-
-            {total > 0 ? (
-              <>
-                <div className="jso-review-bar">
-                  <span><b>{total}</b> skill{total > 1 ? "s" : ""}</span>
-                  <span className="rb-sep">·</span>
-                  <span>{groups.length} source{groups.length > 1 ? "s" : ""}</span>
-                  {mcp.connected && <><span className="rb-sep">·</span><span className="rb-route"><SIcon name="shield-check" size={12} /> auto-route {routeThrough ? "on" : "off"}</span></>}
-                </div>
-                <StagedList removableSkills />
-              </>
-            ) : (
-              <div className="jso-empty-card">
-                <span className="je-ico"><SIcon name="shield-check" size={26} /></span>
-                <div>Your managed library starts empty. Connect an agent over MCP and it’ll push verified skills in as you go.</div>
-              </div>
-            )}
-
-            <div className="jso-cta-row">
-              <button className="jso-back" onClick={back}><SIcon name="arrow-left" size={14} /> Back</button>
-              <button className="jso-cta" onClick={() => onImport(total)}>
-                <SIcon name="scan" size={15} />
-                {total > 0 ? `Run audit on ${total} skill${total > 1 ? "s" : ""}` : "Finish setup"}
-              </button>
-              <span className="jso-cta-note">runs locally · nothing reaches an agent unvetted</span>
-            </div>
-          </>
-        )}
+      <div className="ob-foot">
+        <button className="btn-secondary" onClick={back}>← Back</button>
+        <span className="ob-foot-spacer" />
+        <button className="btn-primary" onClick={() => onImport(total)}>Enter workspace →</button>
       </div>
-    </div>
+    </Shell>
   );
 }
+
+// Hero SVG (welcome) — skills-audit story: skill "diamonds" flow left→right
+// through a central shield/scan gate; on the right they emerge as green checks
+// with ONE red flagged (quarantined) item. Tokens only; reads on light + dark.
+const HERO = (
+  <svg viewBox="0 0 240 150" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Skills audited through a shield gate">
+    <defs>
+      <radialGradient id="ob-hero-glow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.28" />
+        <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+      </radialGradient>
+    </defs>
+
+    {/* glow behind the gate */}
+    <ellipse cx="120" cy="75" rx="56" ry="48" fill="url(#ob-hero-glow)" />
+
+    {/* incoming connectors (faint) */}
+    {[40, 62, 88].map((y, i) => (
+      <line key={i} x1="28" y1={y} x2="104" y2="75" stroke="var(--fg-3)" strokeWidth="0.8" opacity="0.28" />
+    ))}
+    {/* outgoing connectors (faint) */}
+    {[42, 75, 108].map((y, i) => (
+      <line key={i} x1="136" y1="75" x2="212" y2={y} stroke="var(--fg-3)" strokeWidth="0.8" opacity="0.28" />
+    ))}
+
+    {/* incoming skill diamonds (unvetted) */}
+    {[{ x: 24, y: 40 }, { x: 24, y: 62 }, { x: 24, y: 88 }].map((d, i) => (
+      <polygon key={i} points={`${d.x},${d.y - 6} ${d.x + 6},${d.y} ${d.x},${d.y + 6} ${d.x - 6},${d.y}`}
+        fill="none" stroke="var(--fg-3)" strokeWidth="1.4" opacity="0.7" />
+    ))}
+
+    {/* central shield gate */}
+    <path d="M120 40 L140 48 V72 c0 13 -9 21 -20 24 c-11 -3 -20 -11 -20 -24 V48 Z"
+      fill="var(--accent-soft)" stroke="var(--accent)" strokeWidth="2" />
+    {/* scan line + check inside the shield */}
+    <path d="M111 70 l6 6 l11 -12" fill="none" stroke="var(--accent)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+
+    {/* outgoing: two safe checks */}
+    {[{ x: 214, y: 42 }, { x: 214, y: 108 }].map((d, i) => (
+      <g key={i}>
+        <circle cx={d.x} cy={d.y} r="9" fill="var(--safe-soft)" stroke="var(--safe)" strokeWidth="1.4" />
+        <path d={`M${d.x - 4} ${d.y} l3 3 l5 -6`} fill="none" stroke="var(--safe)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </g>
+    ))}
+    {/* outgoing: one flagged / quarantined */}
+    <g>
+      <circle cx="214" cy="75" r="9" fill="var(--danger-soft)" stroke="var(--danger)" strokeWidth="1.4" />
+      <path d="M214 71 v4 M214 79 v.5" stroke="var(--danger)" strokeWidth="1.8" strokeLinecap="round" />
+    </g>
+  </svg>
+);
 
 // The screen registry passes props opaquely (Record<string, unknown>); the
 // shell guarantees the OnboardingProps shape at the App.tsx call site.

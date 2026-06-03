@@ -1,10 +1,12 @@
 // MCP connect block — add the Jenz MCP server to a CLI agent so it pushes its
 // skills into Jenz directly (no folder hunting) and routes new installs through
-// the audit first. Used inline in the onboarding import step or as its own step.
-// Ported node-for-node from skills-mcp.jsx (SPEC §6). Copy: 1400ms; check: 1700ms.
+// the audit first. Rebuilt FLAT to live inside the onboarding ob-card as plain
+// sections separated by spacing/hairlines — no nested bordered card. The agent
+// picker is a Radix segmented control; one terminal command inset; one status
+// row. Copy: 1400ms; check: 1700ms (timers unchanged).
 import { useState } from "react";
 import { SIcon } from "./SIcon";
-import { SourceBadge } from "./SourceBadge";
+import { Segmented } from "./Segmented";
 
 interface McpConnectProps {
   workspace?: string;
@@ -63,42 +65,31 @@ export function McpConnect({ workspace, connected, connectedAgent, onConnect }: 
   };
 
   return (
-    <div className="mcp">
-      <div className="mcp-head">
-        <span className="mcp-ico"><SIcon name="terminal" size={17} /></span>
-        <div className="mcp-head-body">
-          <div className="mcp-title">Connect a CLI agent <span className="mcp-pill">MCP</span></div>
-          <div className="mcp-sub">
-            Your agent has filesystem access, so it can push its skills into Jenz directly — no folder hunting.
-            It’ll also route any new skills it installs through Jenz to be checked first.
-          </div>
-        </div>
-      </div>
+    <div className="ob-mcp">
+      <Segmented
+        value={agent}
+        onValueChange={setAgent}
+        items={AG.map((a) => ({
+          id: a.id,
+          label: a.name,
+          badge: connected && connectedAgent === a.id ? <span className="ob-seg-dot" /> : undefined,
+        }))}
+      />
 
-      <div className="mcp-tabs">
-        {AG.map((a) => (
-          <button key={a.id} className={"mcp-tab" + (agent === a.id ? " on" : "")} onClick={() => setAgent(a.id)}>
-            <SourceBadge kind={a.id} sm />
-            <span>{a.name}</span>
-            {connected && connectedAgent === a.id && <span className="mcp-tab-dot" />}
-          </button>
-        ))}
-      </div>
-
-      <div className="mcp-cmd">
-        <div className="mcp-cmd-bar">
-          <span className="mcp-cmd-label">run in your terminal</span>
-          <button className="mcp-copy" onClick={copy}>
+      <div className="ob-mcp-cmd">
+        <div className="ob-mcp-cmd-bar">
+          <span className="ob-mcp-cmd-label">run in your terminal</span>
+          <button className="ob-mcp-copy" onClick={copy}>
             <SIcon name={copied ? "check" : "copy"} size={12} /> {copied ? "Copied" : "Copy"}
           </button>
         </div>
-        <pre className="mcp-cmd-body">{cmd}</pre>
+        <pre className="ob-mcp-cmd-body">{cmd}</pre>
       </div>
 
-      <div className={"mcp-status" + (connected ? " ok" : "")}>
+      <div className={"ob-mcp-status" + (connected ? " ok" : "")}>
         {connected ? (
           <>
-            <span className="ms-dot ok" />
+            <span className="ob-mcp-dot ok" />
             <span><b>{AG.find((a) => a.id === connectedAgent)?.name || "Agent"}</b> connected — its skills were pushed to Jenz.</span>
           </>
         ) : checking ? (
@@ -108,9 +99,9 @@ export function McpConnect({ workspace, connected, connectedAgent, onConnect }: 
           </>
         ) : (
           <>
-            <span className="ms-dot" />
+            <span className="ob-mcp-dot" />
             <span>Waiting for connection.</span>
-            <button className="mcp-check" onClick={check}>Check connection</button>
+            <button className="ob-mcp-check" onClick={check}>Check connection</button>
           </>
         )}
       </div>
