@@ -55,6 +55,24 @@ must be caught **at least as strictly** as its floor (escalation = `✔↑`, sti
 The deterministic regex floor (CI test) is rock-solid; the model only ever
 escalates the two `suspicious` cases, never leaks an attack to `safe`.
 
+### Live in the library (api.jenz.ai) — seeded 2026-06-03
+
+All 6 are persisted with REAL host verdicts via inline import. Use these IDs for demo buttons:
+
+| Fixture | Stored verdict | Library ID |
+|---------|----------------|------------|
+| Clean deploy helper (benign control) | `safe`       | `cmpxw8bqj000po22qe3sn9w77` |
+| Credential exfiltration              | `malicious`  | `cmpxw8w5h000so22q1jagw9jx` |
+| Instruction-override / injection     | `malicious`  | `cmpxw9p16000xo22qrhwtl435` |
+| Tool poisoning                       | `suspicious` | `cmpxwajvo0012o22qc4bnz05f` |
+| Obfuscated payload                   | `malicious`  | `cmpxwbn9c0016o22q0txtzkgh` |
+| Borderline installer                 | `malicious`  | `cmpxwc920001oo22q37284f1y` |
+
+Demo paths: `GET /api/skills/cmpxw8bqj000po22qe3sn9w77/files` → **200 {files}** (benign releases);
+any attack id → **403** `{error:not_safe,…}`, no files. Re-seed with the command above (idempotent
+per slug). The live `/audit` verify may show tool-poisoning/borderline escalate to `malicious`
+(model non-determinism); both always block.
+
 ## Running the REAL pipeline (no mocks, no regex-only)
 
 Env (`OPENROUTER_API_KEY`, `AUDIT_MODEL=deepseek/deepseek-chat`, `DATABASE_URL`) is
@@ -78,23 +96,21 @@ pnpm --filter @jenz/api exec vitest run src/fixtures/redteam/redteam.test.ts
 
 ## Cross-lane notes (READ before touching `routes/skills.ts`)
 
-- **Inline import shape (converged with Remi/MCP).** The live `POST /api/skills/import`
-  is GitHub-ref-only, so inline fixtures can't persist to the library yet. When
-  implementing the inline path, accept the shape the **MCP `submit_skill` already
-  posts** so one implementation serves both it and this seed:
+- **Inline import — LIVE (resolved 2026-06-03).** `POST /api/skills/import` now accepts
+  the canonical inline shape (converged with Remi's MCP `submit_skill`), so the seed
+  persists fixtures to the live library directly — no GitHub round-trip:
   ```jsonc
   { "source": { "type": "inline", "name": "<str>", "files": [{ "path": "<str>", "content": "<str>" }] } }
-  // github variant (already works): { "source": { "type": "github", "url": "<str>" } }
+  // github variant: { "source": { "type": "github", "url": "<str>" } }
   ```
-  Build `RawSkill = { slug: slugify(name), name, files, source: 'inline' }` → run the
-  same `auditSkill` + persist. This seed already posts that inline shape (then falls
-  back to github `{source}` then legacy `{ref}`), so it works the moment the path lands.
+  The seed posts that shape (falling back to github `{source}` then legacy `{ref}`).
+  `JENZ_API=https://api.jenz.ai/api pnpm --filter @jenz/api seed:demo` seeded all 6 —
+  see the **Live in the library** table above for the IDs.
 
-- **The prod `benign → suspicious` over-flag is NOT a fixture or scoring bug.**
-  Root cause: in prod a model pass fails/times out → `passesHealthy=false` →
-  `scoreRisk([], false)` fails closed to `suspicious` on **zero evidence**. Locally,
-  with a working OpenRouter key + adequate timeout, the benign control is `safe`
-  **deterministically (verified 3×)**. Fix is in the **deploy/engine lane**: ensure
-  the prod `OPENROUTER_API_KEY` is valid + funded and `AUDIT_TIMEOUT_MS` is adequate
-  — not a change to `scoreRisk` or the fixtures. The benign control doubles as the
-  regression pin for this.
+- **The prod `benign → suspicious` over-flag — RESOLVED (2026-06-03).** It was never a
+  fixture/scoring bug: in prod a model pass failed → `passesHealthy=false` →
+  `scoreRisk([], false)` fails closed to `suspicious` on zero evidence. Fixed in the
+  engine lane (`f061e00`: `AUDIT_MODEL` default + bounded transient retry) plus a clean
+  redeploy. Verified live: the benign control audits `safe` in ~8s and persists `safe`
+  (gate → 200 files). The prod OpenRouter key was checked read-only and is valid +
+  funded — never the cause. The benign control remains the regression pin.
