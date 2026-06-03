@@ -12,6 +12,45 @@
  */
 
 import type { RawSkill, Finding, Severity } from '@jenz/shared';
+import { ruleHits, type RegexRule } from './prefilter/types';
+import { OVERRIDE_RULES } from './prefilter/override';
+import { OBFUSC_RULES } from './prefilter/obfusc';
+import { EXFIL_RULES } from './prefilter/exfil';
+
+/**
+ * Pluggable detector rules contributed by the per-category modules
+ * (`prefilter/{override,obfusc,exfil}.ts`). They EXTEND the inline core
+ * detectors below; each fires independently per line and is deduped into the
+ * final output. Built in parallel by disjoint owners — see each module header.
+ */
+const EXTRA_RULES: ReadonlyArray<RegexRule> = [
+  ...OVERRIDE_RULES,
+  ...OBFUSC_RULES,
+  ...EXFIL_RULES,
+];
+
+const SEVERITY_RANK: Readonly<Record<Severity, number>> = {
+  critical: 3,
+  high: 2,
+  medium: 1,
+  low: 0,
+};
+
+/** Collapse duplicate findings by (type, file, line, quote-prefix), keeping the
+ *  highest severity. Pure: returns a new array. Mirrors the orchestrator's union
+ *  dedupe so the prefilter never emits the same evidence twice when a module
+ *  rule overlaps a core detector. */
+function dedupeFindings(findings: Finding[]): Finding[] {
+  const byKey = new Map<string, Finding>();
+  for (const f of findings) {
+    const key = `${f.type}|${f.file}|${f.line}|${f.quote.slice(0, 40)}`;
+    const existing = byKey.get(key);
+    if (!existing || SEVERITY_RANK[f.severity] > SEVERITY_RANK[existing.severity]) {
+      byKey.set(key, f);
+    }
+  }
+  return [...byKey.values()];
+}
 
 // Filesystem paths to credentials/secret stores, plus well-known secret filenames.
 const SECRET_PATH =
@@ -104,8 +143,13 @@ export function prefilter(raw: RawSkill): Finding[] {
       if (!PIPE_TO_SHELL.test(line) && UNTRUSTED_FETCH.test(line)) {
         push('untrusted-fetch', 'medium');
       }
+
+      // Pluggable per-category detector rules (override / obfusc / exfil).
+      for (const rule of EXTRA_RULES) {
+        if (ruleHits(rule, line)) push(rule.type, rule.severity);
+      }
     }
   }
 
-  return findings;
+  return dedupeFindings(findings);
 }
