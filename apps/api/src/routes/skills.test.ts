@@ -14,17 +14,22 @@ vi.mock('../lib/github', () => ({
   },
 }));
 vi.mock('../lib/audit', () => ({ auditSkill: vi.fn() }));
+// The categorizer is open-weight (network) — mock it so route tests stay hermetic.
+vi.mock('../lib/categorize', () => ({ categorizeSkill: vi.fn() }));
 
 import skills from './skills';
 import { prisma } from '../db';
 import { fetchSkillFromGitHub } from '../lib/github';
 import { auditSkill } from '../lib/audit';
+import { categorizeSkill } from '../lib/categorize';
 
 const PREFIX = 'skillsworker-';
 const app = new Hono().route('/api/skills', skills);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default folder for safe skills; individual tests override as needed.
+  vi.mocked(categorizeSkill).mockResolvedValue('General');
 });
 
 afterAll(async () => {
@@ -319,15 +324,21 @@ describe('POST /api/skills/import', () => {
     expect((await res.json()).category).toBeUndefined(); // quarantined → no folder
     const persisted = await prisma.skill.findFirst({ where: { slug } });
     expect(persisted!.category).toBeNull();
+    expect(categorizeSkill).not.toHaveBeenCalled(); // quarantined never categorized
   });
 
-  it('DOES assign the category/folder to a safe skill', async () => {
+  it("files a safe skill into the categorizer's folder (ignores the auditor's category)", async () => {
     const slug = `${PREFIX}safefolder`;
-    vi.mocked(auditSkill).mockResolvedValue({ slug, name: slug, risk: 'safe', category: 'Formatting', findings: [] });
+    // Auditor emits a risk-ish 'safe' category — must be ignored in favour of the categorizer.
+    vi.mocked(auditSkill).mockResolvedValue({ slug, name: slug, risk: 'safe', category: 'safe', findings: [] });
+    vi.mocked(categorizeSkill).mockResolvedValue('Data');
 
     const res = await importReq({ source: { type: 'inline', name: slug, files: [{ path: 'SKILL.md', content: '# ok\n' }] } });
     expect(res.status).toBe(201);
-    expect((await res.json()).category).toBe('Formatting');
+    expect((await res.json()).category).toBe('Data');
+    expect(categorizeSkill).toHaveBeenCalledTimes(1);
+    const persisted = await prisma.skill.findFirst({ where: { slug } });
+    expect(persisted!.category).toBe('Data');
   });
 
   it('maps a GitHubError to its status', async () => {

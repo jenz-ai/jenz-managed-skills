@@ -10,6 +10,7 @@ import { fetchSkillFromGitHub, GitHubError } from '../lib/github';
 import { taxonomyMapFor } from '../lib/taxonomy';
 import { getSupabaseUser } from '../lib/supabase-auth';
 import { ensureUserWorkspace } from '../lib/workspace';
+import { categorizeSkill } from '../lib/categorize';
 
 /**
  * Skill routes — import a skill from GitHub, read its verdict, and the GATE.
@@ -48,15 +49,34 @@ async function resolveWorkspaceId(c: Context): Promise<string | null> {
   return workspace.id;
 }
 
+/** Distinct, non-null topical folders already in a workspace (the open pool when null). */
+async function listWorkspaceFolders(workspaceId: string | null): Promise<string[]> {
+  const rows = await prisma.skill.findMany({
+    where: { workspaceId, category: { not: null } },
+    select: { category: true },
+    distinct: ['category'],
+  });
+  return rows.map((r) => r.category).filter((c): c is string => !!c);
+}
+
 /**
- * Only SAFE skills get a topic folder. A quarantined (suspicious/malicious)
- * skill belongs in Quarantine, not a category — and the auditor's category for
- * a non-safe skill often just echoes the finding type (e.g. 'excessive-agency'),
- * which spawns a junk folder. So we drop `category` unless the verdict is safe.
- * (A dedicated folder-aware categorizer for safe skills is the follow-up.)
+ * Decide a skill's topical folder.
+ *
+ * Only SAFE skills get one — a quarantined (suspicious/malicious) skill belongs
+ * in Quarantine, not a folder. For a safe skill we run the open-weight CATEGORIZER
+ * (folder-aware: reuses an existing workspace folder when one fits, else proposes
+ * a new topic). The auditor's own `category` is ignored here — it only ever emits
+ * a risk-ish label, never a real topic. Categorization is soft: on any failure it
+ * falls back to a neutral folder and never blocks the safe skill.
  */
-function categoryFor(audited: { risk: Risk; category?: string }): { category: string } | Record<string, never> {
-  return audited.risk === 'safe' && audited.category !== undefined ? { category: audited.category } : {};
+async function resolveFolder(
+  raw: RawSkill,
+  audited: { risk: Risk },
+  workspaceId: string | null,
+): Promise<{ category: string } | Record<string, never>> {
+  if (audited.risk !== 'safe') return {};
+  const existing = await listWorkspaceFolders(workspaceId);
+  return { category: await categorizeSkill(raw, existing) };
 }
 
 /**
@@ -247,13 +267,18 @@ skills.post('/import/stream', async (c) => {
           void emit('progress', { message });
         });
 
+        // Safe skills get filed into a topical folder by the open-weight
+        // categorizer (quarantined skills get none). Soft — never blocks.
+        if (audited.risk === 'safe') void emit('progress', { message: 'Filing into a folder…' });
+        const folder = await resolveFolder(raw, audited, workspaceId);
+
         // Host-computed verdict: update the row, then stream the result.
         await prisma.skill.update({
           where: { id: skill.id },
           data: {
             risk: audited.risk,
             ...(audited.description !== undefined ? { description: audited.description } : {}),
-            ...categoryFor(audited),
+            ...folder,
             findings: {
               create: audited.findings.map((f) => ({
                 type: f.type,
@@ -274,7 +299,7 @@ skills.post('/import/stream', async (c) => {
           risk: audited.risk,
           findings: audited.findings,
           ...(audited.description !== undefined ? { description: audited.description } : {}),
-          ...categoryFor(audited),
+          ...folder,
           taxonomy: taxonomyMapFor(audited.findings),
         });
       } catch {
@@ -322,12 +347,15 @@ async function persistAuditRespond(c: Context, raw: RawSkill, workspaceId: strin
 
   // Audit, then write the host-computed verdict + findings onto the row.
   const audited = await auditSkill(raw);
+  // Safe skills get filed into a topical folder by the open-weight categorizer;
+  // quarantined skills get none.
+  const folder = await resolveFolder(raw, audited, workspaceId);
   await prisma.skill.update({
     where: { id: skill.id },
     data: {
       risk: audited.risk,
       ...(audited.description !== undefined ? { description: audited.description } : {}),
-      ...categoryFor(audited),
+      ...folder,
       findings: {
         create: audited.findings.map((f) => ({
           type: f.type,
@@ -349,7 +377,7 @@ async function persistAuditRespond(c: Context, raw: RawSkill, workspaceId: strin
       risk: audited.risk,
       findings: audited.findings,
       ...(audited.description !== undefined ? { description: audited.description } : {}),
-      ...categoryFor(audited),
+      ...folder,
     },
     201,
   );

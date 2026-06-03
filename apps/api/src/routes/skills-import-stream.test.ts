@@ -22,17 +22,21 @@ vi.mock('../lib/github', () => ({
   },
 }));
 vi.mock('../lib/audit', () => ({ auditSkill: vi.fn() }));
+// Categorizer is open-weight (network) — mock so the stream tests stay hermetic.
+vi.mock('../lib/categorize', () => ({ categorizeSkill: vi.fn() }));
 
 import skills from './skills';
 import { prisma } from '../db';
 import { auditSkill } from '../lib/audit';
 import { fetchSkillFromGitHub } from '../lib/github';
+import { categorizeSkill } from '../lib/categorize';
 
 const PREFIX = 'importstream-';
 const app = new Hono().route('/api/skills', skills);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(categorizeSkill).mockResolvedValue('General');
 });
 
 afterAll(async () => {
