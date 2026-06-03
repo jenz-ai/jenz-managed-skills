@@ -1,13 +1,5 @@
 import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
-import auditRoutes from './routes/audit';
-import skillRoutes from './routes/skills';
-
-const app = new Hono();
-
-app.get('/healthz', (c) => c.json({ ok: true }));
-app.route('/audit', auditRoutes);
-app.route('/api/skills', skillRoutes);
+import app from './app';
 
 const port = Number(process.env.PORT) || 8080;
 
