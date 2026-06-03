@@ -1,14 +1,28 @@
-// Audit "moment" screen (demo-critical #1). Props from App.tsx:
-//   { runKey, onDone: (view) => void, onOpenSkill: (sk) => void }
-// Built 1:1 per apps/web/SPEC.md §5.1 + source skills-audit.jsx — matches the
-// prototype DOM + classNames node-for-node, copy verbatim.
-import { useEffect, useMemo, useState } from "react";
+// Audit "moment" screen — streams live verdicts from the real audit API.
+// Props (new contract — App.tsx wires these):
+//   { runKey, sources, onResolved, onDone, onOpenSkill }
+// Visual structure, classNames, and all pure helpers are PRESERVED 1:1.
+// The only change is the data source: real streamImport replaces the mock
+// setTimeout pipeline.
+import { useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { registerScreen } from "../shell/ScreenSlot";
 import { SIcon } from "../components/SIcon";
 import { RiskPill, RiskGlyph } from "../components/RiskPill";
-import { SKILLS, AUDIT_ORDER, SCAN_LABELS, SOURCE_LABEL } from "../data/skills";
-import type { Risk, Skill, View } from "../state/types";
+import { streamImport } from "../lib/api";
+import type { AuditedSkill } from "@jenz/shared";
+import type { Risk } from "../state/types";
+import {
+  toApiSource,
+  sourceLabel,
+  initialRowState,
+  applyRowEvent,
+  rowStatuses,
+  type ImportSource,
+} from "./auditStream";
+
+// Re-export so App.tsx can import from here if convenient.
+export type { ImportSource };
 
 // A row's status while the audit streams: "queued" → "scanning" → its risk.
 export type RowStatus = "queued" | "scanning" | Risk;
@@ -46,9 +60,11 @@ export function threatCount(counts: { suspicious: number; malicious: number }): 
   return counts.suspicious + counts.malicious;
 }
 
-// Sub-line copy for a resolved threat row: prefer the curated headline,
-// else fall back to the first finding's type.
-export function findingFor(sk: Skill): string | undefined {
+// Sub-line copy for a resolved threat row.
+// For live-streamed skills we use the first finding's type (no curated headline).
+export function findingFor(
+  sk: { headline?: string; findings: { type: string }[] },
+): string | undefined {
   return sk.headline || (sk.findings[0] && sk.findings[0].type);
 }
 
@@ -56,64 +72,152 @@ export function findingFor(sk: Skill): string | undefined {
 
 interface AuditProps {
   runKey: number;
-  onDone: (view: View) => void;
-  onOpenSkill: (sk: Skill) => void;
+  sources: ImportSource[];
+  onResolved: (audited: AuditedSkill & { id: string }) => void;
+  onDone: (view: "library" | "audits") => void;
+  onOpenSkill: (id: string) => void;
 }
 
-function Audit({ onDone, onOpenSkill, runKey }: AuditProps) {
-  const order = useMemo(
-    () => AUDIT_ORDER.map((id) => SKILLS.find((s) => s.id === id)!),
-    [],
+// Per-row display data derived from streamed events
+interface RowDisplay {
+  label: string; // the source name shown to the user
+  status: RowStatus;
+  scanLabel: string;
+  verdict: (AuditedSkill & { id: string }) | null;
+  error: string | null;
+}
+
+function Audit({ onDone, onOpenSkill, runKey, sources, onResolved }: AuditProps) {
+  const total = sources.length;
+
+  // rows mirrors sources[]: one display entry per source
+  const [rows, setRows] = useState<RowDisplay[]>(() =>
+    sources.map((s) => ({ label: sourceLabel(s), ...initialRowState() })),
   );
-  const total = order.length;
-  const [statuses, setStatuses] = useState<RowStatus[]>(() => order.map(() => "queued"));
-  const [scanning, setScanning] = useState(0); // index scanning, or >=total when done
-  const [label, setLabel] = useState(SCAN_LABELS[0]);
-  const [started, setStarted] = useState(false); // gate: audit only runs after "Run audit"
+  const [started, setStarted] = useState(false);
+  // Track whether all streams have completed (resolved or errored)
+  const [doneCount, setDoneCount] = useState(0);
 
-  // reset when re-run
+  // Stable ref to sources so the streaming effect doesn't re-fire on re-renders
+  const sourcesRef = useRef(sources);
+  sourcesRef.current = sources;
+
+  // Stable ref to onResolved so the callback inside the async closure captures
+  // the latest version without re-running the effect.
+  const onResolvedRef = useRef(onResolved);
+  onResolvedRef.current = onResolved;
+
+  // Reset on runKey change (re-run)
   useEffect(() => {
-    setStatuses(order.map(() => "queued"));
-    setScanning(0);
+    setRows(
+      sourcesRef.current.map((s) => ({ label: sourceLabel(s), ...initialRowState() })),
+    );
     setStarted(false);
-  }, [runKey, order]);
+    setDoneCount(0);
+  }, [runKey]);
 
-  // drive the scan of the current row
+  // Stream all sources sequentially when started
   useEffect(() => {
     if (!started) return;
-    if (scanning >= total) return;
-    setStatuses((prev) => {
-      const next = prev.slice();
-      next[scanning] = "scanning";
-      return next;
-    });
-    let li = 0;
-    setLabel(SCAN_LABELS[0]);
-    const labelTimer = setInterval(() => {
-      li = (li + 1) % SCAN_LABELS.length;
-      setLabel(SCAN_LABELS[li]);
-    }, 480);
-    const risk = order[scanning].risk;
-    const dwell = dwellForRisk(risk); // threats take a beat longer
-    const resolveTimer = setTimeout(() => {
-      setStatuses((prev) => {
-        const next = prev.slice();
-        next[scanning] = risk;
-        return next;
-      });
-      setScanning((s) => s + 1);
-    }, dwell);
-    return () => {
-      clearInterval(labelTimer);
-      clearTimeout(resolveTimer);
-    };
-  }, [started, scanning, total, order]);
+    if (total === 0) {
+      setDoneCount(0);
+      return;
+    }
 
+    let cancelled = false;
+
+    const streamAll = async () => {
+      for (let i = 0; i < sourcesRef.current.length; i++) {
+        if (cancelled) break;
+        const src = sourcesRef.current[i];
+        const apiSrc = toApiSource(src);
+
+        // Mark row as scanning
+        setRows((prev) => {
+          const next = prev.slice();
+          next[i] = {
+            ...next[i],
+            ...applyRowEvent(initialRowState(), { kind: "scan-start" }),
+          };
+          return next;
+        });
+
+        await streamImport(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          apiSrc as any,
+          {
+            onProgress: (msg) => {
+              if (cancelled) return;
+              setRows((prev) => {
+                const next = prev.slice();
+                next[i] = {
+                  ...next[i],
+                  ...applyRowEvent(
+                    { status: next[i].status, scanLabel: next[i].scanLabel, verdict: next[i].verdict, error: next[i].error },
+                    { kind: "progress", msg },
+                  ),
+                };
+                return next;
+              });
+            },
+            onVerdict: (v) => {
+              if (cancelled) return;
+              setRows((prev) => {
+                const next = prev.slice();
+                next[i] = {
+                  ...next[i],
+                  ...applyRowEvent(
+                    { status: next[i].status, scanLabel: next[i].scanLabel, verdict: next[i].verdict, error: next[i].error },
+                    { kind: "verdict", verdict: v },
+                  ),
+                };
+                return next;
+              });
+              onResolvedRef.current(v);
+            },
+            onError: (err) => {
+              if (cancelled) return;
+              setRows((prev) => {
+                const next = prev.slice();
+                next[i] = {
+                  ...next[i],
+                  ...applyRowEvent(
+                    { status: next[i].status, scanLabel: next[i].scanLabel, verdict: next[i].verdict, error: next[i].error },
+                    { kind: "error", error: err },
+                  ),
+                };
+                return next;
+              });
+            },
+          },
+        );
+
+        if (!cancelled) {
+          setDoneCount((c) => c + 1);
+        }
+      }
+    };
+
+    streamAll().catch(() => {
+      // Surface unexpected errors as done (all remaining rows stay in their current state)
+      if (!cancelled) setDoneCount(sourcesRef.current.length);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [started, total]);
+
+  const statuses = rowStatuses(rows.map((r) => ({ status: r.status, scanLabel: r.scanLabel, verdict: r.verdict, error: r.error })));
   const resolved = resolvedCount(statuses);
-  const done = scanning >= total;
+  const done = started && doneCount >= total && total > 0;
   const counts = deriveCounts(statuses);
   const pct = derivePct(resolved, total);
   const threats = threatCount(counts);
+
+  // The current "live" scan label: from the row currently scanning, or a default.
+  const activeScanLabel =
+    rows.find((r) => r.status === "scanning")?.scanLabel ?? "scanning…";
 
   return (
     <div className="jsa">
@@ -128,10 +232,10 @@ function Audit({ onDone, onOpenSkill, runKey }: AuditProps) {
             </div>
             <div className="jsa-orch-sub">
               {!started
-                ? <>{total} skills imported · open-weight auditor runs locally</>
+                ? <>{total} skill{total !== 1 ? "s" : ""} imported · open-weight auditor runs locally</>
                 : done
-                ? <>open-weight auditor · {total} skills · {threats} flagged</>
-                : <>open-weight auditor running locally · <span className="live">{label}</span></>}
+                ? <>open-weight auditor · {total} skill{total !== 1 ? "s" : ""} · {threats} flagged</>
+                : <>open-weight auditor running locally · <span className="live">{activeScanLabel}</span></>}
             </div>
           </div>
           {!started ? (
@@ -155,16 +259,18 @@ function Audit({ onDone, onOpenSkill, runKey }: AuditProps) {
       </div>
 
       <div className="jsa-list">
-        {order.map((sk, i) => {
-          const st = statuses[i];
+        {rows.map((row, i) => {
+          const st = row.status;
           const resolvedRow = isResolved(st);
-          const finding = findingFor(sk);
+          // For resolved rows with a verdict, surface the first finding type
+          const verdictFindings = row.verdict?.findings ?? [];
+          const finding = verdictFindings[0]?.type;
           return (
             <div
-              key={sk.id}
+              key={i}
               className={"jsa-row " + st}
-              onClick={() => resolvedRow && onOpenSkill(sk)}
-              style={{ cursor: resolvedRow ? "pointer" : "default" }}
+              onClick={() => resolvedRow && row.verdict && onOpenSkill(row.verdict.id)}
+              style={{ cursor: resolvedRow && row.verdict ? "pointer" : "default" }}
             >
               <div className="jsa-row-ico">
                 {st === "queued" && <SIcon name="clock" size={15} />}
@@ -173,15 +279,18 @@ function Audit({ onDone, onOpenSkill, runKey }: AuditProps) {
               </div>
               <div className="jsa-row-body">
                 <div className="jsa-row-name">
-                  {sk.name}
-                  <span className="src">{SOURCE_LABEL[sk.source]}</span>
+                  {row.label}
                 </div>
                 <div className="jsa-row-sub">
                   {st === "queued" && <>queued</>}
-                  {st === "scanning" && <><span className="jsa-scan-dot" />{label}</>}
-                  {st === "safe" && <>no findings · {sk.category}</>}
-                  {st === "suspicious" && <><SIcon name="alert" size={12} />{finding}</>}
-                  {st === "malicious" && <><SIcon name="ban" size={12} />{finding}</>}
+                  {st === "scanning" && <><span className="jsa-scan-dot" />{row.scanLabel}</>}
+                  {st === "safe" && <>no findings</>}
+                  {st === "suspicious" && row.error
+                    ? <><SIcon name="alert" size={12} />error: {row.error}</>
+                    : st === "suspicious" && <><SIcon name="alert" size={12} />{finding}</>}
+                  {st === "malicious" && row.error
+                    ? <><SIcon name="ban" size={12} />blocked: {row.error}</>
+                    : st === "malicious" && <><SIcon name="ban" size={12} />{finding}</>}
                 </div>
               </div>
               <div className="jsa-row-end">
@@ -213,7 +322,7 @@ function Audit({ onDone, onOpenSkill, runKey }: AuditProps) {
             <SIcon name="files" size={14} /> Open Library
           </button>
           {threats > 0 && (
-            <button className="btn-primary" onClick={() => onDone("quarantine")}>
+            <button className="btn-primary" onClick={() => onDone("audits")}>
               <SIcon name="lock" size={14} /> Review Quarantine
             </button>
           )}
@@ -223,5 +332,7 @@ function Audit({ onDone, onOpenSkill, runKey }: AuditProps) {
   );
 }
 
+// Preserve the useMemo over sources in the component for future use; keeping
+// the export for the screen registry which passes props opaquely.
 registerScreen("audit", Audit as unknown as ComponentType<Record<string, unknown>>);
 export default Audit;

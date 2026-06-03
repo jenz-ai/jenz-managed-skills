@@ -6,12 +6,16 @@
 // injection lines still surfaced inline so the audit value is preserved.
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
+import type { Taxonomy } from "@jenz/shared";
 import { registerScreen } from "../shell/ScreenSlot";
 import { SIcon } from "../components/SIcon";
 import { RiskPill } from "../components/RiskPill";
 import { InstallMenu } from "../components/InstallMenu";
+import { TaxonomyBadges } from "../components/TaxonomyBadges";
 import { TARGET_BY_ID } from "../data/targets";
 import { SOURCE_LABEL } from "../data/skills";
+import { getSkill, getSkillFiles, GateError } from "../lib/api";
+import { mapFinding } from "../lib/adapt";
 import type { MdLine, Risk, Skill } from "../state/types";
 
 // ---- pure: files-rail derivation (testable) ----
@@ -35,6 +39,12 @@ export function deriveFiles(sk: Skill): RailFile[] {
     dir: n.endsWith("/"),
     flagged: sk.findings.some((f) => f.file === n),
   }));
+}
+
+// ---- pure: blocked state message (testable) ----
+/** Formats the gate blocked message shown when files are withheld. */
+export function gateBlockedMessage(risk: string, reason: string): string {
+  return `Files withheld — ${reason} (risk: ${risk})`;
 }
 
 // ---- pure: SKILL.md line array → flowing markdown blocks (testable) ----
@@ -264,6 +274,14 @@ function SkillFileBody({
 
 const SEV_RISK: Record<string, Risk> = { high: "malicious", medium: "suspicious", low: "queued" };
 
+// ---- live detail state ----
+type FilesState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ok"; files: { path: string; content: string }[] }
+  | { status: "blocked"; risk: string; reason: string }
+  | { status: "error"; message: string };
+
 interface SkillDetailProps {
   sk: Skill;
   installed: string[];
@@ -287,11 +305,69 @@ function SkillDetail({
   const [sel, setSel] = useState("SKILL.md");
   const [confirm, setConfirm] = useState<null | "approve" | "delete">(null);
   const [scanning, setScanning] = useState(false);
+
+  // Live findings + taxonomy from getSkill
+  const [liveTaxonomy, setLiveTaxonomy] = useState<Record<string, Taxonomy> | undefined>(
+    undefined,
+  );
+  const [liveFindings, setLiveFindings] = useState<Skill["findings"] | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  // Gate: files panel state
+  const [filesState, setFilesState] = useState<FilesState>({ status: "idle" });
+
   useEffect(() => {
     setSel("SKILL.md");
     setConfirm(null);
     setScanning(false);
-  }, [sk.id]);
+    setLiveTaxonomy(undefined);
+    setLiveFindings(null);
+    setDetailError(null);
+    setFilesState({ status: "idle" });
+
+    if (!sk.id) return;
+
+    // Fetch full skill (findings + taxonomy)
+    let cancelled = false;
+    getSkill(sk.id)
+      .then((audited) => {
+        if (cancelled) return;
+        setLiveTaxonomy(audited.taxonomy);
+        setLiveFindings(audited.findings.map(mapFinding));
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setDetailError(err instanceof Error ? err.message : "Failed to load skill details");
+      });
+
+    // Gate: fetch files
+    if (sk.risk === "safe") {
+      setFilesState({ status: "loading" });
+      getSkillFiles(sk.id)
+        .then((files) => {
+          if (cancelled) return;
+          setFilesState({ status: "ok", files });
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          if (err instanceof GateError) {
+            setFilesState({ status: "blocked", risk: err.risk, reason: err.reason });
+          } else {
+            setFilesState({
+              status: "error",
+              message: err instanceof Error ? err.message : "Failed to load files",
+            });
+          }
+        });
+    } else {
+      // Non-safe: immediately show blocked state (gate will 403, but don't need to prove it)
+      setFilesState({ status: "blocked", risk: sk.risk, reason: "Skill is not safe" });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sk.id, sk.risk]);
 
   const runRescan = () => {
     if (scanning) return;
@@ -302,13 +378,19 @@ function SkillDetail({
     }, 1500);
   };
 
+  // Use live findings if available, fall back to prop findings
+  const displayFindings = liveFindings ?? sk.findings;
+
   // file list — SKILL.md plus any files referenced by findings
-  const files = useMemo(() => deriveFiles(sk), [sk]);
+  const files = useMemo(
+    () => deriveFiles({ ...sk, findings: displayFindings }),
+    [sk, displayFindings],
+  );
 
   // body for the selected file (non-SKILL.md = raw finding code)
   const selLines = useMemo<MdLine[]>(() => {
     if (sel === "SKILL.md") return sk.skillMd;
-    const fs = sk.findings.filter((f) => f.file === sel);
+    const fs = displayFindings.filter((f) => f.file === sel);
     if (fs.length) {
       const out: MdLine[] = [];
       fs.forEach((f, i) => {
@@ -318,7 +400,7 @@ function SkillDetail({
       return out;
     }
     return [{ n: 1, text: "// " + sel }];
-  }, [sel, sk]);
+  }, [sel, sk, displayFindings]);
 
   const fileCount = files.filter((f) => !f.dir).length || 1;
 
@@ -494,16 +576,26 @@ function SkillDetail({
               <>
                 <span className="skill-meta-sep">·</span>
                 <span className="skill-meta-item" style={{ color: "var(--danger)" }}>
-                  {sk.findings.length + " finding" + (sk.findings.length > 1 ? "s" : "")}
+                  {displayFindings.length + " finding" + (displayFindings.length > 1 ? "s" : "")}
                 </span>
               </>
             )}
           </div>
 
-          {/* findings as audit evidence (flagged only) */}
-          {sk.findings.length > 0 && (
+          {/* detail load error */}
+          {detailError && (
+            <div className="jsd-gate-blocked">
+              <span className="jgb-ico">
+                <SIcon name="alert" size={14} />
+              </span>
+              <span>Couldn&apos;t load skill details: {detailError}</span>
+            </div>
+          )}
+
+          {/* findings as audit evidence (flagged only) — with taxonomy badges */}
+          {displayFindings.length > 0 && (
             <div className="jsd-findings">
-              {sk.findings.map((f, i) => (
+              {displayFindings.map((f, i) => (
                 <div key={i} className={"finding " + sk.risk}>
                   <div className="finding-head">
                     <span className="finding-ico">
@@ -518,10 +610,54 @@ function SkillDetail({
                   <div className="finding-snippet">
                     <CodeBlock lines={f.snippet} />
                   </div>
+                  <TaxonomyBadges findingType={f.type} taxonomy={liveTaxonomy} />
                 </div>
               ))}
             </div>
           )}
+
+          {/* files panel — the gate */}
+          <div className="jsd-files-panel">
+            <div className="jsd-files-panel-head">
+              <SIcon name="doc" size={12} /> View files
+              {filesState.status === "ok" && (
+                <span className="jfph-count">{filesState.files.length}</span>
+              )}
+            </div>
+            {filesState.status === "idle" && null}
+            {filesState.status === "loading" && (
+              <div className="jsd-spin-wrap">
+                <span className="jsd-spin" />
+                Loading files…
+              </div>
+            )}
+            {filesState.status === "blocked" && (
+              <div className="jsd-gate-blocked">
+                <span className="jgb-ico">
+                  <SIcon name="lock" size={14} />
+                </span>
+                <span>{gateBlockedMessage(filesState.risk, filesState.reason)}</span>
+              </div>
+            )}
+            {filesState.status === "error" && (
+              <div className="jsd-gate-blocked">
+                <span className="jgb-ico">
+                  <SIcon name="alert" size={14} />
+                </span>
+                <span>Couldn&apos;t load files: {filesState.message}</span>
+              </div>
+            )}
+            {filesState.status === "ok" &&
+              filesState.files.map((file, i) => (
+                <div key={i} className="jsd-file-item">
+                  <div className="jsd-file-item-bar">
+                    <SIcon name="doc" size={12} />
+                    <span className="jfib-path">{file.path}</span>
+                  </div>
+                  <pre className="jsd-file-item-content">{file.content}</pre>
+                </div>
+              ))}
+          </div>
 
           {/* skill file — single hairline + flowing markdown */}
           <div className="skill-file-bar">
