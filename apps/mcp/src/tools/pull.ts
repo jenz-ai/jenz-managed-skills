@@ -4,15 +4,24 @@ export type PullResult =
   | { ok: true; name: string; files: { path: string; content: string }[]; hint: string }
   | { ok: false; risk: 'pending' | 'suspicious' | 'malicious'; reason: string };
 
+const BLOCKED_RISKS = ['pending', 'suspicious', 'malicious'] as const;
+type BlockedRisk = (typeof BLOCKED_RISKS)[number];
+// Fail closed: any risk that isn't one of the three blocked values (including 'safe',
+// undefined, or garbage from a misbehaving backend) collapses to 'malicious'. We never
+// cast 'safe' into the blocked branch.
+const blockedRisk = (r: unknown): BlockedRisk =>
+  BLOCKED_RISKS.includes(r as BlockedRisk) ? (r as BlockedRisk) : 'malicious';
+
 export async function pullSkill(id: string): Promise<PullResult> {
   const { status, body } = await api.files(id);
   if (status !== 200) {
     return {
       ok: false,
-      risk: (body.risk ?? 'malicious') as 'pending' | 'suspicious' | 'malicious',
+      risk: blockedRisk(body.risk),
       reason: body.reason ?? body.error ?? 'blocked',
     };
   }
+  // 200 contract: the backend gate guarantees `name` and `files` on a safe response.
   return {
     ok: true,
     name: body.name!,
