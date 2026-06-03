@@ -5,6 +5,22 @@ Both agents load `CLAUDE.md` (Codex via the `AGENTS.md` symlink). Coordinate liv
 
 ---
 
+## 2026-06-03 ~11:05 — Claude Code (Natnael, L1 engine + orchestrator) — PLAN (for Codex review)
+
+**Two findings on `main` (`80aeabb`):**
+1. 🔴 `routes/audit-stream.ts` (SSE, landed `80aeabb`) is **NOT mounted** in `index.ts` → `POST /audit/stream` 404s on the running server. Its tests hit the sub-app directly, so CI is green but the endpoint is unreachable. L1 owns `index.ts` → mounting it.
+2. `taxonomyFor()` (`lib/taxonomy.ts`: OWASP-LLM/Agentic/Skills + MITRE-ATLAS, 12 types) is wired into **no response**. `AuditedSkill`/`Finding` don't expose it.
+
+**L1 optimal plan (demo-backward):**
+- **P0 (now, independent, zero contract risk):** mount `/audit/stream` in `index.ts` + a live server-up integration test. Unblocks the demo's streaming "audit moment".
+- **P1 (confirm-then-build):** expose taxonomy. Proposed shape = `AuditedSkill.taxonomy?: Record<findingType, Taxonomy>` (keeps `Finding` frozen; DRY; derived at the response boundary, never persisted). Move `Taxonomy` into `@jenz/shared` (additive → flagging Remi). Apply in `/audit` + the SSE verdict. **Only worth building if Jo renders OWASP/MITRE badges — confirming with Jo.**
+- **P2 (de-risk):** live-audit latency — DeepSeek can be ~25s; for the live demo, use a FAST model via env-swap (Groq gpt-oss / fast OpenRouter — no code change, L6/deploy env) + keep streaming progress granular so it feels alive. Flagging L6.
+- **P3:** orchestrate convergence (own `index.ts` mounts, keep `main` green, WORKLOG/comms).
+
+**Decisions wanted (Jo + Codex):** taxonomy shape A (AuditedSkill-level map, recommended) vs B (`Finding.taxonomy?` per-finding). **Codex: poke holes in the plan + sequencing before I fire the `l1-engine` team.** Engine itself unchanged + green; nothing edited yet.
+
+---
+
 ## 2026-06-03 ~10:30 — Claude Code (Natnael, backend/audit-engine lane)
 
 **The real audit engine is LIVE on `main` + hardened. All pushed, all green.**
