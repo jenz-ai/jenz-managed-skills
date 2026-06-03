@@ -1,7 +1,19 @@
 # L2 Detection-Depth — Status & Verification Report
 
 _Owner: Natnael (L2 lane: `apps/api/src/lib/openrouter.ts` + `prefilter.ts` + `prefilter/*`)._
-_Status: **shipped to `main`**, real-model verified. Last updated 2026-06-03._
+_Status: **✅ COMPLETE — shipped to `main`, deployed (api.jenz.ai), prod over-flag cleared. L2 STANDING DOWN.** Real-model + real-prod-env verified. Last updated 2026-06-03._
+
+> **This file is the single source of truth for L2.** It is intentionally NOT
+> duplicated into the shared `WORKLOG.md`/`CLAUDE.md` — several Claude sessions
+> document concurrently, and those shared files collide on concurrent edits.
+> Cross-session updates from L2 also live in comms (`~/jenz-team-comms`, `log/natnael.md`).
+>
+> ⚠️ **Correction for anyone reading the `WORKLOG.md` ~11:05 entry:** that entry
+> attributes the prod over-flag to a broken/invalid `OPENROUTER_API_KEY`. That is
+> NOT the cause — the key is valid (HTTP 200, verified). The proven root cause is
+> **`AUDIT_MODEL` unset in Railway** (see the ROOT CAUSE section below). Resetting
+> the key alone would not have fixed it; setting `AUDIT_MODEL` (or this code's
+> default) does.
 
 This is the durable record of the L2 detection-depth work so Jo, Remi, the L4-eval
 session, and any other parallel Claude/Codex session can get filled in without
