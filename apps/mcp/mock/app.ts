@@ -35,6 +35,7 @@ app.post('/api/skills/import', async (c) => {
   if (source.type === 'inline') {
     raw = { slug: slugify(source.name), name: source.name, files: source.files, source: 'inline' };
   } else {
+    // Dev mock: we don't fetch the repo — stash the URL as the file body so canned() has something to scan.
     const name = String(source.url).split('/').filter(Boolean).pop() ?? 'skill';
     raw = { slug: slugify(name), name, files: [{ path: 'SKILL.md', content: source.url }],
             source: 'github', sourceRef: source.url };
@@ -79,7 +80,7 @@ app.get('/api/skills/:id/files', (c) => {
   const id = c.req.param('id');
   const rec = store.get(id);
   if (!rec) return c.json({ error: 'not_found' }, 404);
-  const verdict = rec.verdict ?? canned(rec.raw);
+  const verdict = (rec.verdict ??= canned(rec.raw)); // persist, so GET /:id is consistent after /files
   if (verdict.risk !== 'safe') {
     return c.json({ error: 'not_safe', risk: verdict.risk, reason: `blocked: risk=${verdict.risk}` }, 403);
   }
