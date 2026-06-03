@@ -26,6 +26,15 @@ Open-weight **security gate** that audits AI-agent *skills* (markdown + scripts 
 - `pnpm typecheck` – type-check every package (`pnpm -r typecheck`) — **run before every push**
 - `pnpm --filter @jenz/api test` – run API tests (Vitest)
 
+## Local Dev & Database — **no Docker required**
+- **The audit-engine lane is DB-free.** `auditSkill` and everything in `apps/api/src/lib/*` are **pure functions** — build & test them with Vitest, **no Postgres, no Docker.** (`pnpm --filter @jenz/api test`.) The DB only backs the *platform* (auth, workspaces, gate persistence), which is Jo's lane.
+- **DB stack:** Supabase (hosted Postgres) + Prisma (Jo) · deployed on Railway. The audit logic never touches it.
+- **When you do need the DB locally, you still don't need Docker.** Two options:
+  1. **Point at hosted Supabase (recommended):** put Jo's `DATABASE_URL` (Supabase pooled connection string) in `apps/api/.env` (gitignored). Prisma talks to the cloud DB directly — nothing to run locally.
+  2. **Native local Postgres:** `brew services start postgresql@15` → `DATABASE_URL=postgresql://localhost:5432/jenz`. No Docker.
+- ⚠️ `supabase start` (the local Supabase stack) **requires Docker** — we do **not** use it; we point at the hosted project. Don't install Docker for this.
+- **Env vars** (`apps/api/.env`, never committed): `DATABASE_URL` (Supabase) · `AUDIT_MODEL` + `OPENROUTER_API_KEY` / `GROQ_API_KEY` (model).
+
 ## The 3 Frozen Contracts (do not change shapes without team agreement)
 1. **Types** — `packages/shared/types.ts`, imported as `@jenz/shared`:
    `Risk` (`pending|safe|suspicious|malicious`), `Severity`, `Detector`, `SkillSource`, `Finding`, `SkillFile`, `RawSkill`, `AuditedSkill`.
