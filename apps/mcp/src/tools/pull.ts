@@ -21,11 +21,15 @@ export async function pullSkill(id: string): Promise<PullResult> {
       reason: body.reason ?? body.error ?? 'blocked',
     };
   }
-  // 200 contract: the backend gate guarantees `name` and `files` on a safe response.
+  // 200 contract: the backend gate guarantees `name` + `files` on a safe response.
+  // Fail closed if a malformed 200 is missing them rather than returning files:undefined.
+  if (!body.name || !body.files) {
+    throw new Error('malformed 200 from gate: missing name/files');
+  }
   return {
     ok: true,
-    name: body.name!,
-    files: body.files!,
+    name: body.name,
+    files: body.files,
     hint: 'Write these to ~/.claude/skills/<name>/ then re-run skill discovery.',
   };
 }
