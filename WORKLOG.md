@@ -5,6 +5,24 @@ Both agents load `CLAUDE.md` (Codex via the `AGENTS.md` symlink). Coordinate liv
 
 ---
 
+## 2026-06-03 ~11:35 — Claude Code (Natnael, L1 engine — WORKER; Codex = team lead)
+
+**L1 lane work DONE + verified end-to-end with the REAL model.**
+- **P0 ✅ (`b143442`):** mounted `POST /audit/stream` in `app.ts` (was unmounted → 404 live) + `import 'dotenv/config'` in `index.ts` (local `tsx`/`pnpm dev:api` now loads `apps/api/.env` real keys — fixed the regex-only/no-model-key issue). App-level mount tests in `app.test.ts`.
+- **P1 ✅ (`1409097`):** `POST /audit` enriches the response with **`AuditedSkill.taxonomy?: Record<findingType, Taxonomy>`** (OWASP-LLM/Agentic/Skills + MITRE-ATLAS), derived host-side at the boundary, **never persisted**; `Finding` shape UNCHANGED; `score.ts` untouched; `Taxonomy` moved to `@jenz/shared`. `taxonomyMapFor()` exported from `lib/taxonomy.ts`.
+- **Live smoke (real DeepSeek, local `:8099`):** malicious → `malicious` + finding + `taxonomy.exfiltration` full crosswalk ✅ · benign `/audit/stream` → SSE `progress` events + `verdict` event + `safe` ✅. **Engine is correct — prod benign→suspicious is ONLY the Railway `AUDIT_MODEL` unset (L6 fixing).**
+- Tests: **17 green** (taxonomy + route + app); api+shared typecheck clean.
+
+**Open follow-ups (Codex to route / next L1 turn):**
+1. **Taxonomy everywhere:** apply `taxonomyMapFor(findings)` at the OTHER serialization boundaries — the SSE verdict in `routes/audit-stream.ts` (L5) + Jo's stored `GET /api/skills/:id` (`routes/skills.ts`) — so badges show in the audit-moment + library/detail, not just one-shot `/audit`. Helper is ready; both are other lanes → coordinate.
+2. **Railway:** L6 owns `AUDIT_MODEL=deepseek/deepseek-chat` (+ verify `OPENROUTER_API_KEY`/`OPENROUTER_BASE_URL`) + redeploy → re-smoke prod benign→safe.
+3. **L3 seed:** `/import` inline body = `{source:{type:inline,name,files}}` (Remi's shape), not `{raw}`.
+4. **mcp local typecheck** needs `pnpm install` in `apps/mcp` (env, CI is fine — not a code bug).
+
+**Gotchas unchanged:** kill stale `:8080` before smoke; fresh clone needs `pnpm install && pnpm --filter @jenz/api exec prisma generate`; real `.env` copied into all 7 worktrees (gitignored).
+
+---
+
 ## 2026-06-03 ~11:05 — Claude Code (Natnael, L1 engine + orchestrator)
 
 **✅ UPDATE ~11:22 — P0 LANDED** (Codex-approved). Mounted `POST /audit/stream` in `app.ts` (it was **never mounted** → 404 on the live server; the SSE "audit moment" now works once redeployed) + added `import 'dotenv/config'` to `index.ts` so local `tsx`/`pnpm dev:api` loads `apps/api/.env` real keys (the root cause of the regex-only/"no model key" eval). App-level mount tests added (`app.test.ts`: `/audit/stream` + `/audit` → 400, not 404). typecheck clean, 12 green. **I own `app.ts` (route-mounting) + `index.ts` — ping me in comms to mount a route; don't edit `app.ts`.** Also copied the real `apps/api/.env` into all 7 worktrees (gitignored). **P1 (taxonomy Option A) next, via the `l1-engine` team.**
