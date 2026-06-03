@@ -26,3 +26,19 @@ export function trigMeta(t: AuditRun["trigger"]): { icon: string; label: string 
   if (t === "github") return { icon: "git", label: "GitHub" };
   return { icon: "scan", label: "Import" };
 }
+
+// --- pure aggregation (tested) -------------------------------------------
+// Threats caught in a single run = its suspicious + malicious findings.
+export function runThreats(r: AuditRun): number {
+  return r.suspicious + r.malicious;
+}
+
+// Headline stat: total skills scanned across every run.
+export function totalScanned(runs: AuditRun[]): number {
+  return runs.reduce((a, r) => a + r.scanned, 0);
+}
+
+// Headline stat: total threats caught (suspicious + malicious) across all runs.
+export function totalThreats(runs: AuditRun[]): number {
+  return runs.reduce((a, r) => a + runThreats(r), 0);
+}
