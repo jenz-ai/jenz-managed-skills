@@ -81,10 +81,19 @@ async function tryPass(
   raw: RawSkill,
   temperature: number,
 ): Promise<ModelAudit | null> {
+  // Bound every model call: a slow/hung provider must fail closed (→ null),
+  // never hang the whole audit. Critical for the live demo.
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    Number(process.env.AUDIT_TIMEOUT_MS) || 25_000,
+  );
   try {
-    return await run(raw, { temperature });
+    return await run(raw, { temperature, signal: controller.signal });
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
