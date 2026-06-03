@@ -182,12 +182,13 @@ export default function App() {
     }
   };
 
-  // In-app re-import (the AuditHome modal). Sources aren't collected here yet,
-  // so this just opens the audit screen's ready state. Onboarding is the real
-  // streaming-import path. TODO: collect sources in the modal too.
-  const runImport = () => {
+  // In-app re-import (the Import modal, from the sidebar / AuditHome). The modal
+  // collects ImportSource[] (folder uploads + GitHub) the same way onboarding
+  // does, and we stream-audit them through the live API — same path as
+  // handleOnboardingComplete, just without leaving the app.
+  const runImport = (sources: ImportSource[]) => {
     setImportOpen(false);
-    setAuditSources([]);
+    setAuditSources(sources);
     setRunKey((k) => k + 1);
     setView("audit");
   };
