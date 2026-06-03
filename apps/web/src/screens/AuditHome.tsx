@@ -64,7 +64,7 @@ function AuditHome({ skills, onImport, onOpenQuarantine, onOpenSkill }: AuditHom
                     <div className="jh-row-top"><b>{sk.name}</b> <span className="jh-trig">{SOURCE_LABEL[sk.source]}</span></div>
                     <div className="jh-row-when">
                       {sk.category}
-                      {sk.findings.length > 0 && <> · {sk.findings.length} finding{sk.findings.length > 1 ? "s" : ""}</>}
+                      {sk.findings.length > 0 && <>{sk.category ? " · " : ""}{sk.findings.length} finding{sk.findings.length > 1 ? "s" : ""}</>}
                     </div>
                   </div>
                   <div className="jh-row-end">

@@ -72,10 +72,12 @@ function SkillCard({ sk, installed, onOpen, onDragStart, onDragEnd, dragging }: 
         </div>
       )}
       <div className="skill-card-foot">
-        <span className="skill-card-tag">
-          <span className="t-glyph"><SIcon name="folder" size={12} /></span>
-          {sk.category}
-        </span>
+        {sk.category && (
+          <span className="skill-card-tag">
+            <span className="t-glyph"><SIcon name="folder" size={12} /></span>
+            {sk.category}
+          </span>
+        )}
         <span className="skill-card-tag">{SOURCE_LABEL[sk.source]}</span>
         {flagged ? (
           <span className="skill-card-findings has">

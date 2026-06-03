@@ -129,9 +129,9 @@ describe("auditedToSkill", () => {
   it("headline is undefined (not in AuditedSkill)", () => {
     expect(auditedToSkill(auditedBase).headline).toBeUndefined();
   });
-  it("uses 'Imported' when category is absent", () => {
+  it("uses '' (no folder) when category is absent — quarantined skills carry none", () => {
     const noCategory = auditedToSkill({ ...auditedBase, category: undefined });
-    expect(noCategory.category).toBe("Imported");
+    expect(noCategory.category).toBe("");
   });
   it("uses empty string when description is absent", () => {
     const noDesc = auditedToSkill({ ...auditedBase, description: undefined });
@@ -178,9 +178,9 @@ describe("listItemToSkill", () => {
   it("defaults files to 1", () => {
     expect(listItemToSkill(listItemBase).files).toBe(1);
   });
-  it("uses 'Imported' when category is absent", () => {
+  it("uses '' (no folder) when category is absent — quarantined skills carry none", () => {
     const noCategory = listItemToSkill({ ...listItemBase, category: "" });
-    expect(noCategory.category).toBe("Imported");
+    expect(noCategory.category).toBe("");
   });
 });
 

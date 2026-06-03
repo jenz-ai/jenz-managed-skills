@@ -77,14 +77,16 @@ export function mapFinding(f: SharedFinding): Finding {
  *   `getSkillFiles`; update the Skill after that call.
  * - `headline`: always `undefined` — not in AuditedSkill; the UI falls back
  *   to `findings[0].type` (see `topFinding` in Library.tsx).
- * - `category`: falls back to `'Imported'` when absent.
+ * - `category`: falls back to `''` (no folder) when absent. Quarantined skills
+ *   carry no category (the host drops it — they live in Quarantine, not a
+ *   folder); safe skills always get a real category from the categorizer.
  * - `desc`: falls back to `''` when absent.
  */
 export function auditedToSkill(a: AuditedSkill & { id: string }): Skill {
   return {
     id: a.id,
     name: a.name,
-    category: a.category || "Imported", // API may omit; 'Imported' is the safe default
+    category: a.category ?? "", // absent ⟺ quarantined → no folder
     source: "claude",                    // API doesn't return source — default to claude
     risk: mapRisk(a.risk),
     desc: a.description ?? "",           // description is optional in AuditedSkill
@@ -105,13 +107,14 @@ export function auditedToSkill(a: AuditedSkill & { id: string }): Skill {
  *   `findingsCount`. The count is available on the ListItem if a screen needs
  *   it; it does not map to `Skill.findings`.
  * - `source`, `skillMd`, `files`, `headline`: same defaults as auditedToSkill.
- * - `category`: falls back to `'Imported'` when absent or empty string.
+ * - `category`: empty string when absent. Quarantined skills carry no category
+ *   (they live in Quarantine, not a folder); safe skills always have one.
  */
 export function listItemToSkill(li: ListItem): Skill {
   return {
     id: li.id,
     name: li.name,
-    category: li.category || "Imported", // empty string or absent → 'Imported'
+    category: li.category ?? "", // absent ⟺ quarantined → no folder
     source: "claude",                     // API doesn't return source — default to claude
     risk: mapRisk(li.risk),
     desc: li.description,

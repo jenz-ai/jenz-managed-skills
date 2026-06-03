@@ -15,6 +15,7 @@ interface SidebarProps {
   onNav: (view: View, cat?: string | null) => void;
   onOpenSkill: (id: string) => void;
   onAddCategory: (name: string) => void;
+  onDeleteCategory: (name: string) => void;
   onAddSkill: (cat: string, name: string) => void;
   onDropSkill: (id: string, cat: string) => void;
   dragging: string | null;
@@ -30,7 +31,7 @@ interface SidebarProps {
 export function Sidebar(props: SidebarProps) {
   const {
     view, activeCategory, skillId, skills, categories, onNav, onOpenSkill,
-    onAddCategory, onAddSkill, onDropSkill, dragging, theme, onToggleTheme, onLogout,
+    onAddCategory, onDeleteCategory, onAddSkill, onDropSkill, dragging, theme, onToggleTheme, onLogout,
     workspaceName = "Workspace",
   } = props;
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -142,6 +143,15 @@ export function Sidebar(props: SidebarProps) {
                   onClick={(e) => { e.stopPropagation(); setAddingCat(cat); }}
                 >
                   <SIcon name="plus" size={12} />
+                </span>
+                <span
+                  className="jg-del" title="Delete folder"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`Delete folder "${cat}"? Its skills move to All skills.`)) onDeleteCategory(cat);
+                  }}
+                >
+                  <SIcon name="x" size={12} />
                 </span>
               </button>
               {addingCat === cat && (

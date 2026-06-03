@@ -18,9 +18,11 @@ import type { ImportSource } from "./screens/onboardingLogic";
 import type { AuditedSkill } from "@jenz/shared";
 import { useAuth } from "./auth/AuthProvider";
 
-// Unique, non-empty folder names across a skill set.
+// Unique, non-empty folder names. Folders come ONLY from SAFE skills — a
+// quarantined skill lives in Quarantine, not a topic folder, so it must never
+// spawn one (otherwise an empty "Imported" folder appears for held-back skills).
 const catsOf = (arr: Skill[]) =>
-  Array.from(new Set(arr.map((s) => s.category))).filter(Boolean);
+  Array.from(new Set(arr.filter((s) => s.risk === "safe").map((s) => s.category))).filter(Boolean);
 
 interface Toast {
   msg: ReactNode;
@@ -126,7 +128,10 @@ export default function App() {
       next[i] = sk;
       return next;
     });
-    setCategories((prev) => (prev.includes(sk.category) ? prev : [...prev, sk.category]));
+    // Only safe skills get a folder; a quarantined verdict adds no category.
+    if (sk.risk === "safe" && sk.category) {
+      setCategories((prev) => (prev.includes(sk.category) ? prev : [...prev, sk.category]));
+    }
   };
 
   const moveSkill = (id: string, cat: string) => {
@@ -139,6 +144,14 @@ export default function App() {
     if (categories.includes(name)) { notify(<><b>{name}</b> already exists</>); return; }
     setCategories((c) => [...c, name]);
     notify(<>Folder <b>{name}</b> created</>);
+  };
+  // Delete a folder (client-side, like the other folder actions). Its skills are
+  // NOT deleted — they're un-filed (category → "") so they stay in All skills.
+  const deleteCategory = (name: string) => {
+    setCategories((c) => c.filter((x) => x !== name));
+    setSkills((arr) => arr.map((s) => (s.category === name ? { ...s, category: "" } : s)));
+    if (activeCategory === name) { setActiveCategory(null); setView("library"); }
+    notify(<>Folder <b>{name}</b> deleted</>);
   };
   // CLIENT-SIDE ONLY: creates a local skill (unaudited). A real "new skill"
   // should route through the import/audit pipeline + persist, not appear safe.
@@ -244,7 +257,7 @@ export default function App() {
           view={view} activeCategory={activeCategory} skillId={skillId}
           skills={skills} categories={categories}
           onNav={nav} onOpenSkill={openSkill}
-          onAddCategory={addCategory} onAddSkill={addSkill} onDropSkill={moveSkill}
+          onAddCategory={addCategory} onDeleteCategory={deleteCategory} onAddSkill={addSkill} onDropSkill={moveSkill}
           dragging={dragging} onDragStart={setDragging} onDragEnd={() => setDragging(null)}
           onImport={() => setImportOpen(true)}
           workspaceName={workspace?.name ?? "Workspace"}

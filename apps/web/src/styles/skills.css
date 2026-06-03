@@ -1657,6 +1657,13 @@
 }
 .js-grp:hover .jg-add { opacity: 1; }
 .js-grp-head .jg-add:hover { background: var(--bg-4); color: var(--fg-0); }
+.js-grp-head .jg-del {
+  width: 17px; height: 17px; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--fg-3); opacity: 0; flex-shrink: 0;
+}
+.js-grp:hover .jg-del { opacity: 1; }
+.js-grp-head .jg-del:hover { background: var(--danger-bg, #fee); color: var(--danger, #c0392b); }
 .js-grp-items { padding: 1px 0 4px 8px; display: flex; flex-direction: column; gap: 1px; }
 .js-sk {
   display: flex;
