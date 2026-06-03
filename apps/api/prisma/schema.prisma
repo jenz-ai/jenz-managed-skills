@@ -1,0 +1,79 @@
+// Gate-core schema. Enums mirror packages/shared/types.ts 1:1 (frozen Contract 1).
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+/// Risk verdict — mirrors `Risk` union in @jenz/shared.
+enum Risk {
+  pending
+  safe
+  suspicious
+  malicious
+}
+
+/// mirrors `Severity` union in @jenz/shared.
+enum Severity {
+  critical
+  high
+  medium
+  low
+}
+
+/// mirrors `Detector` union in @jenz/shared.
+enum Detector {
+  regex
+  llm
+}
+
+/// mirrors `SkillSource` union in @jenz/shared.
+enum SkillSource {
+  github
+  upload
+  mcp
+  inline
+}
+
+/// An audited skill (a SKILL.md + bundled files). The gate releases `files`
+/// only when `risk == safe`.
+model Skill {
+  id          String      @id @default(cuid())
+  slug        String      @unique
+  name        String
+  source      SkillSource
+  sourceRef   String?
+  risk        Risk        @default(pending)
+  description String?
+  category    String?
+  files       SkillFile[]
+  findings    Finding[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model SkillFile {
+  id      String @id @default(cuid())
+  skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId String
+  path    String
+  content String
+
+  @@unique([skillId, path])
+}
+
+model Finding {
+  id       String   @id @default(cuid())
+  skill    Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId  String
+  type     String
+  severity Severity
+  file     String
+  line     Int
+  quote    String
+  detector Detector
+}
