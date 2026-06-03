@@ -10,14 +10,25 @@ const anon = env["VITE_SUPABASE_ANON_KEY"];
 if (!url || !anon) {
   // Fail loud in the console rather than a cryptic runtime error deep in auth.
   console.warn(
-    "[jenz] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY missing — sign-in will not work.",
+    "[jenz] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY missing — sign-in disabled.",
   );
 }
 
-export const supabase = createClient(url ?? "", anon ?? "", {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true, // completes the magic-link / OAuth redirect
-  },
-});
+/** Whether the Supabase client is configured (both env vars present). */
+export const supabaseConfigured = Boolean(url && anon);
+
+// IMPORTANT: createClient throws "supabaseUrl is required" on an empty URL, so we
+// must NOT call it with a fallback "" — that white-screens the whole app at module
+// load when the env is missing. Instead export null and let consumers degrade to
+// "auth not configured" gracefully. The agent-facing gate/audit API stays open and
+// is independent of this client.
+export const supabase =
+  url && anon
+    ? createClient(url, anon, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true, // completes the magic-link / OAuth redirect
+        },
+      })
+    : null;

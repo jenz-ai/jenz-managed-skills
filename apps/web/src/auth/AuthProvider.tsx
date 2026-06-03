@@ -43,6 +43,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
 
+    // Supabase not configured (missing VITE_SUPABASE_* at build time) → don't
+    // crash; surface as signed-out so the auth screens still render and the
+    // console warning (lib/supabase.ts) explains why sign-in is disabled.
+    if (!supabase) {
+      setStatus("signedOut");
+      return;
+    }
+
     async function applySession(session: Session | null) {
       if (!session?.access_token) {
         tokenRef.current = null;
@@ -100,19 +108,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     workspace,
     async signInWithEmail(email) {
+      if (!supabase) return { error: "Sign-in is not configured." };
       const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
       return { error: error?.message ?? null };
     },
     async createWorkspace(name, email) {
+      if (!supabase) return { error: "Sign-in is not configured." };
       localStorage.setItem(PENDING_KEY, name);
       const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
       return { error: error?.message ?? null };
     },
     async signInWithOAuth(provider) {
+      if (!supabase) return { error: "Sign-in is not configured." };
       const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo } });
       return { error: error?.message ?? null };
     },
     async signOut() {
+      if (!supabase) return;
       await supabase.auth.signOut();
     },
     async renameWorkspace(input) {
