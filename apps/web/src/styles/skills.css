@@ -738,6 +738,7 @@
   margin-bottom: 16px;
 }
 .jsa-orch-ico {
+  position: relative;
   width: 38px; height: 38px;
   border-radius: 10px;
   background: var(--bg-2);
@@ -745,6 +746,120 @@
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--accent);
   flex-shrink: 0;
+  isolation: isolate;
+  transition: border-color .5s ease, color .5s ease, box-shadow .5s ease;
+}
+
+/* ---- Radar / AI-brain pulse (the auditor node) -------------------------- */
+/* The core holds the icon; rings + sweep ping outward behind it while
+   auditing, then settle to a calm shield on done. */
+.jsa-radar-core {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  transition: transform .5s cubic-bezier(.2,.8,.2,1);
+  will-change: transform;
+}
+
+/* Concentric sonar rings — three staggered pings that expand and fade. */
+.jsa-radar-rings {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.jsa-radar-rings .jsa-ring {
+  position: absolute;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  opacity: 0;
+  transform: scale(0.45);
+  will-change: transform, opacity;
+}
+
+/* Slow rotating conic sweep, masked to a ring band for the radar feel. */
+.jsa-radar-sweep {
+  position: absolute;
+  inset: -3px;
+  z-index: 0;
+  border-radius: 12px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--accent-soft) 36deg,
+    transparent 96deg
+  );
+  opacity: 0;
+  -webkit-mask: radial-gradient(closest-side, transparent 56%, #000 60%, #000 92%, transparent 100%);
+          mask: radial-gradient(closest-side, transparent 56%, #000 60%, #000 92%, transparent 100%);
+  transition: opacity .5s ease;
+}
+
+/* --- idle: calm, one slow breath, no pings --- */
+.jsa-orch.is-idle .jsa-radar-core { animation: jsa-breath 3.6s ease-in-out infinite; }
+.jsa-orch.is-idle .jsa-radar-sweep { opacity: 0; }
+
+/* --- active: sonar pings + sweep + glowing core --- */
+.jsa-orch.is-scanning .jsa-orch-ico {
+  box-shadow: 0 0 0 1px var(--accent-line), 0 0 22px var(--accent-soft);
+}
+.jsa-orch.is-scanning .jsa-radar-core { animation: jsa-core-pulse 2.1s ease-in-out infinite; }
+.jsa-orch.is-scanning .jsa-radar-sweep { opacity: 1; animation: jsa-sweep 3.2s linear infinite; }
+.jsa-orch.is-scanning .jsa-ring { animation: jsa-ping 2.1s cubic-bezier(.22,.61,.36,1) infinite; }
+.jsa-orch.is-scanning .jsa-ring:nth-child(2) { animation-delay: .7s; }
+.jsa-orch.is-scanning .jsa-ring:nth-child(3) { animation-delay: 1.4s; }
+
+/* --- done: rings stop, node settles to a shield with a glow-settle --- */
+.jsa-orch.is-done { animation: none; }
+.jsa-orch.is-done .jsa-radar-sweep { opacity: 0; }
+.jsa-orch.is-done .jsa-orch-ico {
+  border-color: var(--safe-line);
+  color: var(--safe);
+  box-shadow: 0 0 0 1px var(--safe-line), 0 0 26px var(--safe-soft);
+  animation: jsa-settle .6s cubic-bezier(.2,.9,.2,1) both;
+}
+.jsa-orch.is-done.has-threat .jsa-orch-ico {
+  border-color: var(--danger-line);
+  color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger-line), 0 0 26px var(--danger-soft);
+  animation: jsa-settle-threat .6s cubic-bezier(.2,.9,.2,1) both;
+}
+.jsa-orch.is-done .jsa-radar-core { animation: jsa-settle-core .6s cubic-bezier(.2,.9,.2,1) both; }
+
+@keyframes jsa-ping {
+  0%   { opacity: 0;    transform: scale(0.45); }
+  12%  { opacity: 0.85; }
+  100% { opacity: 0;    transform: scale(2.25); }
+}
+@keyframes jsa-sweep {
+  to { transform: rotate(360deg); }
+}
+@keyframes jsa-core-pulse {
+  0%, 100% { transform: scale(1);    filter: drop-shadow(0 0 0 transparent); }
+  50%      { transform: scale(1.08); filter: drop-shadow(0 0 6px var(--accent-soft)); }
+}
+@keyframes jsa-breath {
+  0%, 100% { transform: scale(1);    opacity: 0.85; }
+  50%      { transform: scale(1.05); opacity: 1; }
+}
+@keyframes jsa-settle {
+  0%   { box-shadow: 0 0 0 1px var(--accent-line), 0 0 40px var(--accent-soft); }
+  100% { box-shadow: 0 0 0 1px var(--safe-line),   0 0 26px var(--safe-soft); }
+}
+@keyframes jsa-settle-threat {
+  0%   { box-shadow: 0 0 0 1px var(--danger-line), 0 0 42px var(--danger-soft); }
+  100% { box-shadow: 0 0 0 1px var(--danger-line), 0 0 26px var(--danger-soft); }
+}
+@keyframes jsa-settle-core {
+  0%   { transform: scale(0.6); }
+  55%  { transform: scale(1.14); }
+  100% { transform: scale(1); }
 }
 .jsa-orch-body { flex: 1; min-width: 0; }
 .jsa-orch-title { font-size: 15px; color: var(--fg-0); font-weight: 600; }
@@ -766,11 +881,31 @@
   position: relative;
 }
 .jsa-bar-fill {
+  position: relative;
   height: 100%;
   border-radius: 99px;
   background: linear-gradient(90deg, oklch(0.66 0.14 295), oklch(0.78 0.13 295));
   transition: width .5s cubic-bezier(.4,0,.2,1);
   box-shadow: 0 0 12px var(--accent-soft);
+  overflow: hidden;
+}
+/* Subtle light sheen travelling along the fill while audit is in progress. */
+.jsa-bar-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 35%,
+    oklch(0.98 0.02 295 / 0.35) 50%,
+    transparent 65%
+  );
+  transform: translateX(-100%);
+  animation: jsa-bar-sheen 2.2s ease-in-out infinite;
+}
+@keyframes jsa-bar-sheen {
+  0%   { transform: translateX(-100%); }
+  55%, 100% { transform: translateX(100%); }
 }
 .jsa-bar-stats {
   display: flex;
@@ -801,6 +936,24 @@
 .jsa-row.scanning {
   border-color: var(--accent-line);
   background: linear-gradient(90deg, var(--accent-soft), transparent 60%), var(--bg-1);
+  position: relative;
+  overflow: hidden;
+}
+/* Soft accent sheen sweeping across the active row — reads as "the auditor's
+   beam passing over this skill." */
+.jsa-row.scanning::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    var(--accent-soft) 50%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: jsa-shimmer 1.8s ease-in-out infinite;
 }
 .jsa-row.malicious {
   border-color: var(--danger-line);
@@ -847,6 +1000,22 @@
 }
 .jsa-row-end { flex-shrink: 0; }
 
+/* Verdict "pop": the glyph + pill scale-and-fade in when a row resolves. */
+.jsa-pop {
+  display: inline-flex;
+  transform-origin: center;
+  animation: jsa-verdict-pop .34s cubic-bezier(.2,.9,.25,1.3) both;
+}
+@keyframes jsa-verdict-pop {
+  0%   { opacity: 0; transform: scale(0.6); }
+  60%  { opacity: 1; transform: scale(1.12); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes jsa-shimmer {
+  0%   { transform: translateX(-100%); }
+  60%, 100% { transform: translateX(100%); }
+}
+
 .jsa-done-bar {
   margin-top: 22px;
   display: flex;
@@ -856,9 +1025,14 @@
   border: 1px solid var(--safe-line);
   background: var(--safe-soft);
   border-radius: 11px;
+  animation: jsa-done-in .42s cubic-bezier(.2,.85,.25,1) both;
 }
 .jsa-done-bar.has-threat { border-color: var(--danger-line); background: var(--danger-soft); }
-.jsa-done-ico { color: var(--safe); display: inline-flex; flex-shrink: 0; }
+.jsa-done-ico { color: var(--safe); display: inline-flex; flex-shrink: 0; animation: jsa-verdict-pop .5s cubic-bezier(.2,.9,.25,1.3) both .1s; }
+@keyframes jsa-done-in {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
 .jsa-done-bar.has-threat .jsa-done-ico { color: var(--danger); }
 .jsa-done-body { flex: 1; }
 .jsa-done-title { font-size: 13.5px; color: var(--fg-0); font-weight: 600; }
@@ -1416,6 +1590,21 @@
   .jsa-scan-dot, .dot.running { animation: none; }
   .js-toast { animation: none; }
   .qa-btn svg.spin { animation: none; }
+
+  /* Radar / AI-brain pulse: rings static, no sweep, instant verdict reveal. */
+  .jsa-radar-rings .jsa-ring { animation: none; opacity: 0; }
+  .jsa-radar-sweep { animation: none; opacity: 0; }
+  .jsa-radar-core,
+  .jsa-orch.is-idle .jsa-radar-core,
+  .jsa-orch.is-scanning .jsa-radar-core,
+  .jsa-orch.is-done .jsa-radar-core { animation: none; transform: none; }
+  .jsa-orch.is-done .jsa-orch-ico,
+  .jsa-orch.is-done.has-threat .jsa-orch-ico { animation: none; }
+  .jsa-row.scanning::after { animation: none; opacity: 0; }
+  .jsa-bar-fill::after { animation: none; opacity: 0; }
+  .jsa-pop { animation: none; }
+  .jsa-done-bar { animation: none; }
+  .jsa-done-ico { animation: none; }
 }
 
 /* ============================================================ sidebar library section */

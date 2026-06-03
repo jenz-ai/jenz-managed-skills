@@ -219,12 +219,31 @@ function Audit({ onDone, onOpenSkill, runKey, sources, onResolved }: AuditProps)
   const activeScanLabel =
     rows.find((r) => r.status === "scanning")?.scanLabel ?? "scanning…";
 
+  // Radar phase drives the orchestrator-node visual: calm idle → live sonar →
+  // settled shield. Threat tint is only applied on the settled state.
+  const phase = !started ? "idle" : done ? "done" : "active";
+  const orchClass =
+    "jsa-orch " +
+    (phase === "active" ? "is-scanning" : phase === "done" ? "is-done" : "is-idle") +
+    (done && threats ? " has-threat" : "");
+
   return (
     <div className="jsa">
-      <div className="jsa-orch">
+      <div className={orchClass}>
         <div className="jsa-orch-top">
-          <div className="jsa-orch-ico">
-            <SIcon name={!started ? "scan" : done ? "shield-check" : "scan"} size={20} />
+          <div className="jsa-orch-ico" aria-hidden="true">
+            <span className="jsa-radar-rings">
+              <span className="jsa-ring" />
+              <span className="jsa-ring" />
+              <span className="jsa-ring" />
+            </span>
+            <span className="jsa-radar-sweep" />
+            <span className="jsa-radar-core">
+              <SIcon
+                name={done ? (threats ? "shield-alert" : "shield-check") : "scan"}
+                size={20}
+              />
+            </span>
           </div>
           <div className="jsa-orch-body">
             <div className="jsa-orch-title">
@@ -275,7 +294,11 @@ function Audit({ onDone, onOpenSkill, runKey, sources, onResolved }: AuditProps)
               <div className="jsa-row-ico">
                 {st === "queued" && <SIcon name="clock" size={15} />}
                 {st === "scanning" && <SIcon name="scan" size={15} />}
-                {resolvedRow && <RiskGlyph risk={st as Risk} size={16} />}
+                {resolvedRow && (
+                  <span className="jsa-pop">
+                    <RiskGlyph risk={st as Risk} size={16} />
+                  </span>
+                )}
               </div>
               <div className="jsa-row-body">
                 <div className="jsa-row-name">
@@ -296,7 +319,11 @@ function Audit({ onDone, onOpenSkill, runKey, sources, onResolved }: AuditProps)
               <div className="jsa-row-end">
                 {st === "queued" && <RiskPill risk="queued" label="queued" sm />}
                 {st === "scanning" && <RiskPill risk="scanning" label="scanning" sm />}
-                {resolvedRow && <RiskPill risk={st as Risk} sm />}
+                {resolvedRow && (
+                  <span className="jsa-pop">
+                    <RiskPill risk={st as Risk} sm />
+                  </span>
+                )}
               </div>
             </div>
           );
