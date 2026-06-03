@@ -76,6 +76,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @jenz/mcp typecheck
-      - run: pnpm --filter @jenz/mcp test
-      - run: pnpm --filter @jenz/mcp build
+      - run: pnpm --filter @jenz-ai/skills-mcp typecheck
+      - run: pnpm --filter @jenz-ai/skills-mcp test
+      - run: pnpm --filter @jenz-ai/skills-mcp build

@@ -5,7 +5,7 @@
   "scripts": {
     "dev:api": "pnpm --filter @jenz/api dev",
     "dev:web": "pnpm --filter @jenz/web dev",
-    "dev:mcp": "pnpm --filter @jenz/mcp dev",
+    "dev:mcp": "pnpm --filter @jenz-ai/skills-mcp dev",
     "typecheck": "pnpm -r typecheck"
   },
   "packageManager": "pnpm@9.12.0",

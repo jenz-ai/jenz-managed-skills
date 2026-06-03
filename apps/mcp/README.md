@@ -1,4 +1,4 @@
-# @jenz/mcp
+# @jenz-ai/skills-mcp
 
 Thin MCP server: submit skills for a security audit, pull back only the `safe` ones.
 No detection logic here — it's a gate-faithful client over the jenz HTTP API.
@@ -11,18 +11,18 @@ No detection logic here — it's a gate-faithful client over the jenz HTTP API.
 
 ## Run locally (against the mock)
 ```bash
-pnpm --filter @jenz/mcp mock     # terminal A — mock API on :8787
-pnpm --filter @jenz/mcp build
+pnpm --filter @jenz-ai/skills-mcp mock     # terminal A — mock API on :8787
+pnpm --filter @jenz-ai/skills-mcp build
 ```
 
 ## Add to Claude Code (stdio)
 Published — npx one-liner (recommended):
 ```bash
-claude mcp add jenz-skills -e JENZ_API=https://skills.jenz.ai/api -- npx -y @jenz/mcp
+claude mcp add jenz-skills -e JENZ_API=https://skills.jenz.ai/api -- npx -y @jenz-ai/skills-mcp
 ```
 From a local build (no publish needed):
 ```bash
-pnpm --filter @jenz/mcp build
+pnpm --filter @jenz-ai/skills-mcp build
 claude mcp add jenz-skills -e JENZ_API=https://skills.jenz.ai/api -- node /ABSOLUTE/PATH/apps/mcp/dist/index.js
 ```
 The API is currently open — no workspace token needed. `JENZ_API` defaults to the local
@@ -36,9 +36,9 @@ mock (`http://localhost:8787/api`) if unset, so set it to the live API for a rea
 Drives all 4 tools through a real stdio MCP client and asserts the gate. Defaults to an
 in-process mock; point at a real backend by setting `JENZ_API`:
 ```bash
-pnpm --filter @jenz/mcp smoke                                  # against the mock
+pnpm --filter @jenz-ai/skills-mcp smoke                                  # against the mock
 JENZ_API=https://skills.jenz.ai/api JENZ_WORKSPACE=<token> \
-  pnpm --filter @jenz/mcp smoke                                # against the real API
+  pnpm --filter @jenz-ai/skills-mcp smoke                                # against the real API
 ```
 Exits non-zero if any scenario fails (4 tools present, poison→blocked-no-files, safe→files, list).
 
