@@ -29,6 +29,8 @@ beforeEach(() => {
 
 afterAll(async () => {
   await prisma.skill.deleteMany({ where: { slug: { startsWith: PREFIX } } });
+  await prisma.workspace.deleteMany({ where: { slug: { startsWith: PREFIX } } });
+  await prisma.user.deleteMany({ where: { id: { startsWith: PREFIX } } });
   await prisma.$disconnect();
 });
 
@@ -196,6 +198,27 @@ describe('GET /api/skills — the library list', () => {
     const body = await res.json();
     expect(body.skills.length).toBeGreaterThan(0);
     expect(body.skills.every((s: { risk: string }) => s.risk === 'safe')).toBe(true);
+  });
+
+  it('scopes the library by workspace: a workspace-owned skill is NOT in the open (unauthed) pool', async () => {
+    const user = await prisma.user.create({
+      data: { id: `${PREFIX}user`, email: `${PREFIX}u@example.com` },
+    });
+    const ws = await prisma.workspace.create({
+      data: { name: 'Scoped WS', slug: `${PREFIX}ws`, ownerId: user.id },
+    });
+    // One skill owned by a workspace, one in the open/null (agent/MCP) pool.
+    await prisma.skill.create({
+      data: { slug: `${PREFIX}scoped`, name: 'Scoped Skill', source: 'upload', risk: 'safe', category: CAT, workspaceId: ws.id },
+    });
+    await seed({ slug: `${PREFIX}open`, risk: 'safe', name: 'Open Skill', category: CAT });
+
+    // No bearer → the open pool only. The workspace-owned skill must NOT leak.
+    const res = await app.request(`/api/skills?category=${CAT}`);
+    expect(res.status).toBe(200);
+    const names = (await res.json()).skills.map((s: { name: string }) => s.name);
+    expect(names).toContain('Open Skill');
+    expect(names).not.toContain('Scoped Skill');
   });
 
   it('filters by free-text query (case-insensitive, matches name)', async () => {

@@ -10,6 +10,24 @@ export const API_BASE: string =
     ? (import.meta as { env?: Record<string, string> }).env?.["VITE_API_BASE"]
     : undefined) ?? "https://api.jenz.ai/api";
 
+// ---- auth -------------------------------------------------------------------
+
+// The dashboard's Supabase access token, set by AuthProvider on sign-in/out.
+// Sent as `Authorization: Bearer` so the API scopes the library + imports to the
+// signed-in user's workspace (a user sees only their own uploads). Unset = the
+// open agent/MCP pool. Module-level so callers don't have to thread it through.
+let authToken: string | null = null;
+
+/** Set (or clear, with null) the bearer token used for workspace-scoped calls. */
+export function setAuthToken(token: string | null): void {
+  authToken = token;
+}
+
+/** Authorization header when signed in, else empty. */
+function authHeaders(): Record<string, string> {
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {};
+}
+
 // ---- shared types ----------------------------------------------------------
 
 /** Summary shape returned by GET /skills. */
@@ -139,7 +157,7 @@ export async function listSkills(params?: {
     risk: params?.risk,
     query: params?.query,
   });
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: authHeaders() });
   await throwIfNotOk(res);
   const body = (await res.json()) as { skills: ListItem[] };
   return body.skills;
@@ -202,6 +220,7 @@ export async function streamImport(
     headers: {
       "Content-Type": "application/json",
       "Accept": "text/event-stream",
+      ...authHeaders(),
     },
     body: JSON.stringify({ source }),
   });

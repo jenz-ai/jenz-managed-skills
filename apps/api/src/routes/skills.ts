@@ -8,6 +8,8 @@ import { prisma } from '../db';
 import { auditSkill } from '../lib/audit';
 import { fetchSkillFromGitHub, GitHubError } from '../lib/github';
 import { taxonomyMapFor } from '../lib/taxonomy';
+import { getSupabaseUser } from '../lib/supabase-auth';
+import { ensureUserWorkspace } from '../lib/workspace';
 
 /**
  * Skill routes — import a skill from GitHub, read its verdict, and the GATE.
@@ -27,6 +29,26 @@ const skills = new Hono();
 const VALID_RISK: readonly Risk[] = ['pending', 'safe', 'suspicious', 'malicious'];
 
 /**
+ * Resolve the calling workspace from an optional Supabase bearer token.
+ *
+ * - Valid dashboard token  → that user's workspace id (library is per-workspace).
+ * - No / invalid token     → null = the open "agent/MCP" pool.
+ *
+ * NON-FATAL by design: the agent-facing API (MCP `list_managed_skills`,
+ * unauthenticated import, the gate) must keep working without a token, so an
+ * absent/invalid token resolves to the null pool rather than a 401.
+ */
+async function resolveWorkspaceId(c: Context): Promise<string | null> {
+  const header = c.req.header('Authorization') ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  if (!token) return null;
+  const user = await getSupabaseUser(token);
+  if (!user) return null;
+  const { workspace } = await ensureUserWorkspace(user);
+  return workspace.id;
+}
+
+/**
  * GET / — browse/search the workspace skill library. Returns lightweight
  * summaries only (NO file contents — that's the gate's job). Optional filters:
  *   ?category=<exact>  ?risk=<pending|safe|suspicious|malicious>  ?query=<free text>
@@ -38,7 +60,9 @@ skills.get('/', async (c) => {
   // `query` is the MCP param name; accept `q` as a convenience alias.
   const query = c.req.query('query') ?? c.req.query('q');
 
-  const where: Prisma.SkillWhereInput = {};
+  // Scope the library to the caller's workspace (null = open agent/MCP pool),
+  // so a signed-in dashboard user sees only their own uploads.
+  const where: Prisma.SkillWhereInput = { workspaceId: await resolveWorkspaceId(c) };
   if (category) where.category = category;
   if (risk && VALID_RISK.includes(risk as Risk)) where.risk = risk as Risk;
   if (query) {
@@ -145,7 +169,7 @@ skills.post('/import', async (c) => {
 
   const result = await resolveRawSkill(body);
   if ('error' in result) return c.json({ error: result.error }, result.status as 400);
-  return persistAuditRespond(c, result.raw);
+  return persistAuditRespond(c, result.raw, await resolveWorkspaceId(c));
 });
 
 /**
@@ -171,6 +195,7 @@ skills.post('/import/stream', async (c) => {
   const result = await resolveRawSkill(body);
   if ('error' in result) return c.json({ error: result.error }, result.status as 400);
   const raw = result.raw;
+  const workspaceId = await resolveWorkspaceId(c);
 
   // Persist as `pending` BEFORE streaming, so the id is available in the verdict event.
   const skill = await prisma.$transaction(async (tx) => {
@@ -181,6 +206,7 @@ skills.post('/import/stream', async (c) => {
         name: raw.name,
         source: raw.source,
         ...(raw.sourceRef ? { sourceRef: raw.sourceRef } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
         risk: 'pending',
         contentHash: computeContentHash(raw.files),
         files: { create: raw.files.map((f) => ({ path: f.path, content: f.content })) },
@@ -265,7 +291,7 @@ skills.post('/import/stream', async (c) => {
  * runs the audit, writes the host-computed verdict + findings, and returns
  * the AuditedSkill+id envelope.
  */
-async function persistAuditRespond(c: Context, raw: RawSkill) {
+async function persistAuditRespond(c: Context, raw: RawSkill, workspaceId: string | null) {
   // Persist as pending first, replacing any prior row for this slug.
   const skill = await prisma.$transaction(async (tx) => {
     await tx.skill.deleteMany({ where: { slug: raw.slug } });
@@ -275,6 +301,7 @@ async function persistAuditRespond(c: Context, raw: RawSkill) {
         name: raw.name,
         source: raw.source,
         ...(raw.sourceRef ? { sourceRef: raw.sourceRef } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
         risk: 'pending',
         contentHash: computeContentHash(raw.files),
         files: { create: raw.files.map((f) => ({ path: f.path, content: f.content })) },

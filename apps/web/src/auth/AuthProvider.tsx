@@ -7,6 +7,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import { setAuthToken } from "../lib/api";
 import { fetchMe, patchWorkspace, type Workspace } from "./authApi";
 
 const PENDING_KEY = "jenz-pending-workspace-name";
@@ -54,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function applySession(session: Session | null) {
       if (!session?.access_token) {
         tokenRef.current = null;
+        setAuthToken(null); // clear the workspace-scoping token for API calls
         if (active) {
           setUser(undefined);
           setWorkspace(undefined);
@@ -62,6 +64,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       tokenRef.current = session.access_token;
+      // Scope library + import API calls to this user's workspace. Set BEFORE
+      // <App> mounts (status flips to signedIn below), so its initial
+      // listSkills() is already workspace-scoped.
+      setAuthToken(session.access_token);
       const email = session.user?.email ?? "";
       try {
         let me = await fetchMe(session.access_token);

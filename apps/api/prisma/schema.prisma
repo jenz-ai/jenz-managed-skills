@@ -54,10 +54,18 @@ model Skill {
   /// re-verifies this before releasing files — a mismatch means the bytes
   /// changed since the audit, so it fails closed. Nullable for pre-hash rows.
   contentHash String?
+  /// Owning workspace. NULL = the open "agent/MCP" pool (unauthenticated import
+  /// + the agent gate). Dashboard imports stamp the signed-in user's workspace,
+  /// so GET /skills scopes the library per workspace — a user sees only their
+  /// own uploads. The agent-facing gate (GET /:id/files) stays open regardless.
+  workspaceId String?
+  workspace   Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   files       SkillFile[]
   findings    Finding[]
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+
+  @@index([workspaceId])
 }
 
 /// A platform user. Identity comes from Supabase Auth — `id` is the Supabase
@@ -71,14 +79,16 @@ model User {
 }
 
 /// A workspace, owned by exactly one user (minimal single-workspace-per-user
-/// for now — invites/multi-member are deferred). Skills are NOT scoped to a
-/// workspace yet; the audited library is shared. `slug` is used in CLI/MCP copy.
+/// for now — invites/multi-member are deferred). Skills ARE scoped to a
+/// workspace (`Skill.workspaceId`); the dashboard library is per-workspace.
+/// `slug` is used in CLI/MCP copy.
 model Workspace {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
   owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   ownerId   String   @unique
+  skills    Skill[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

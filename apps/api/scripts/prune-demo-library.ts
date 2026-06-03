@@ -30,11 +30,16 @@ import { redteamFixtures } from '../src/fixtures/redteam';
 
 const prisma = new PrismaClient();
 const APPLY = process.argv.includes('--apply');
+// --all wipes the ENTIRE library (keep nothing) — used to reset to an empty,
+// per-workspace start. Without it, the demo keep-set (fixtures + corpus) is kept.
+const ALL = process.argv.includes('--all');
 
 // The keep-set: red-team fixture NAMES ∪ anything from the agent-skills corpus.
+// With --all, nothing is kept.
 const keepNames = new Set(redteamFixtures.map((fx) => fx.raw.name));
 const isCorpus = (name: string) => name.startsWith('agent-skills/');
-const shouldKeep = (s: { slug: string; name: string }) => keepNames.has(s.name) || isCorpus(s.name);
+const shouldKeep = (s: { slug: string; name: string }) =>
+  !ALL && (keepNames.has(s.name) || isCorpus(s.name));
 
 const pad = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s.padEnd(n));
 
