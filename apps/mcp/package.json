@@ -1,15 +1,25 @@
 {
   "name": "@jenz-ai/skills-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "Jenz Managed Skills MCP server — audit AI-agent skills and pull back only the safe ones (gate-faithful client over the jenz audit API).",
-  "keywords": ["mcp", "model-context-protocol", "claude", "security", "prompt-injection", "skills"],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "security",
+    "prompt-injection",
+    "skills"
+  ],
   "license": "MIT",
   "bin": {
     "jenz-skills-mcp": "./dist/index.js"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "publishConfig": {
     "access": "public"
   },
