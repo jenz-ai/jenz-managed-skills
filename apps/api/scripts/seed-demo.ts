@@ -22,7 +22,7 @@
  * Real-model run (env injected by Railway, no secrets in the shell):
  *   railway run -- pnpm --filter @jenz/api seed:demo
  * Or against a running API:
- *   JENZ_API=https://skills.jenz.ai/api pnpm --filter @jenz/api seed:demo
+ *   JENZ_API=https://api.jenz.ai/api pnpm --filter @jenz/api seed:demo
  */
 import type { AuditedSkill, RawSkill, Risk } from '@jenz/shared';
 import { redteamFixtures } from '../src/fixtures/redteam';
