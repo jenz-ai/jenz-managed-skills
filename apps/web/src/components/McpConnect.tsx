@@ -22,29 +22,30 @@ const AG = [
   { id: "hermes", name: "Hermes" },
 ];
 
-// Per-agent CLI command, verbatim from skills-mcp.jsx CONFIG. The `\` + newline
-// continuations are part of the on-screen copy.
-function mcpCommand(agent: string, ws: string): string {
+// Canonical Jenz MCP base — verified live by Remi (api.jenz.ai). The package is
+// @jenz-ai/skills-mcp on npm; the server reads its API from the JENZ_API env, so
+// the command is workspace-agnostic (the API is open, no token).
+const JENZ_API = "https://api.jenz.ai/api";
+
+// Per-agent CLI command. The `\` + newline continuations are part of the
+// on-screen copy. Claude form is Remi-verified; others mirror the same
+// `-e JENZ_API … -- npx -y @jenz-ai/skills-mcp` shape per agent CLI.
+function mcpCommand(agent: string): string {
   const CONFIG: Record<string, string> = {
-    claude: `claude mcp add jenz \\\n  -- npx -y @jenz/mcp --workspace ${ws}`,
-    codex: `codex mcp add jenz \\\n  npx -y @jenz/mcp --workspace ${ws}`,
-    openclaw: `openclaw connect jenz \\\n  --cmd "npx -y @jenz/mcp" --workspace ${ws}`,
-    hermes: `hermes mcp:add jenz \\\n  "npx -y @jenz/mcp --workspace ${ws}"`,
+    claude: `claude mcp add jenz-skills \\\n  -e JENZ_API=${JENZ_API} \\\n  -- npx -y @jenz-ai/skills-mcp`,
+    codex: `codex mcp add jenz-skills \\\n  --env JENZ_API=${JENZ_API} \\\n  -- npx -y @jenz-ai/skills-mcp`,
+    openclaw: `openclaw connect jenz-skills \\\n  --env JENZ_API=${JENZ_API} \\\n  --cmd "npx -y @jenz-ai/skills-mcp"`,
+    hermes: `hermes mcp:add jenz-skills \\\n  --env JENZ_API=${JENZ_API} \\\n  -- npx -y @jenz-ai/skills-mcp`,
   };
   return CONFIG[agent];
 }
 
-export function McpConnect({ workspace, connected, connectedAgent, onConnect }: McpConnectProps) {
+export function McpConnect({ connected, connectedAgent, onConnect }: McpConnectProps) {
   const [agent, setAgent] = useState<string>(connectedAgent || "claude");
   const [checking, setChecking] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const ws =
-    (workspace || "workspace")
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, "-")
-      .replace(/^-|-$/g, "") || "workspace";
-  const cmd = mcpCommand(agent, ws);
+  const cmd = mcpCommand(agent);
 
   const copy = () => {
     try {
