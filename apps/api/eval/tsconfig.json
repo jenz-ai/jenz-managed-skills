@@ -1,0 +1,12 @@
+{
+  "//": "Scoped typecheck for the L4 eval lane. Extends the api base but widens",
+  "//2": "rootDir to the package root so eval/ + the read-only engine import compile.",
+  "//3": "Run: pnpm --filter @jenz/api exec tsc -p eval/tsconfig.json --noEmit",
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".."
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
